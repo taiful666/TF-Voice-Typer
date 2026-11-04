@@ -181,20 +181,21 @@ class VoiceService : LifecycleService(), SavedStateRegistryOwner {
 
     private fun createChannel() {
         val nm = getSystemService(NotificationManager::class.java)
+        // Old channel had buttons/extra text — remove it (channel importance can't be changed once made).
+        runCatching { nm.deleteNotificationChannel("tf_voice") }
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL, "ভয়েস টাইপার", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "রেকর্ডিং ও ভাসমান মাইক চালু থাকলে দেখায়"
+            // MIN = silent, folded into the bottom "silent" section, no pop-up, no sound.
+            NotificationChannel(CHANNEL, "মাইক চালু", NotificationManager.IMPORTANCE_MIN).apply {
+                description = "ভাসমান মাইক চালু থাকলে ছোট করে দেখায়"
                 setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
             }
         )
     }
 
     private fun updateNotification(st: EngineState) {
-        val key = when (st) {
-            is EngineState.Recording -> "rec"
-            is EngineState.Processing -> "proc${st.part}/${st.parts}"
-            else -> "idle"
-        }
+        val key = "mic" // one fixed, simple notice — never changes
         if (key == lastNotifKey) return
         lastNotifKey = key
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -203,41 +204,30 @@ class VoiceService : LifecycleService(), SavedStateRegistryOwner {
         runCatching { getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification(st)) }
     }
 
+    /** Only one tiny line: "মাইক চালু আছে". No buttons, no extra text — so nobody clears it by mistake. */
+    @Suppress("UNUSED_PARAMETER")
     private fun buildNotification(st: EngineState): Notification {
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        fun action(a: String, req: Int): PendingIntent = PendingIntent.getService(
-            this, req, Intent(this, VoiceService::class.java).setAction(a).putExtra(EXTRA_SOURCE, "bubble"),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        val b = NotificationCompat.Builder(this, CHANNEL)
+        return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_mic)
+            .setContentTitle("মাইক চালু আছে")
             .setContentIntent(open)
             .setOngoing(true)
             .setSilent(true)
+            .setShowWhen(false)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-        when (st) {
-            is EngineState.Recording -> b.setContentTitle("রেকর্ড হচ্ছে…")
-                .setContentText("কথা শেষ হলে থামান চাপুন")
-                .setUsesChronometer(true)
-                .setWhen(System.currentTimeMillis() - st.elapsedMs)
-                .addAction(0, "থামান", action(ACTION_STOP_RECORDING, 2))
-            is EngineState.Processing -> b.setContentTitle("লেখা তৈরি হচ্ছে…")
-                .setContentText(if (st.parts > 1) "অংশ ${st.part}/${st.parts} — Gemini AI কাজ করছে" else "Gemini AI কাজ করছে")
-                .setProgress(0, 0, true)
-            else -> b.setContentTitle("TF Voice Typer চালু আছে")
-                .setContentText(if (bubbleWanted) "ভাসমান মাইকে ট্যাপ করে বাংলায় বলুন" else "প্রস্তুত")
-                .addAction(0, "রেকর্ড", action(ACTION_TOGGLE, 1))
-                .addAction(0, "মাইক বন্ধ", action(ACTION_QUIT, 3))
-        }
-        return b.build()
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_DEFERRED)
+            .build()
     }
 
     companion object {
-        private const val CHANNEL = "tf_voice"
+        private const val CHANNEL = "tf_voice_min"
         private const val NOTIF_ID = 42
         const val ACTION_BUBBLE_ON = "tf.bubble.on"
         const val ACTION_BUBBLE_OFF = "tf.bubble.off"
