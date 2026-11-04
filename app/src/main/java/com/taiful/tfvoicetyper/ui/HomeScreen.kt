@@ -110,8 +110,6 @@ fun HomeScreen(
         val problem by vm.tf.lastProblem.collectAsState()
         problem?.let { p ->
             SectionCard("আগের বার একটি সমস্যা হয়েছিল", Icons.Outlined.ErrorOutline) {
-                InfoText("সমস্যাটি ঠিক করার জন্য নিচের \"কপি\" চেপে লেখাটি Claude-কে পাঠান। ভাসমান মাইক সাময়িকভাবে বন্ধ করা হয়েছে — চাইলে আবার চালু করতে পারেন।")
-                Spacer(Modifier.height(6.dp))
                 Text(p.take(300), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 5)
                 Spacer(Modifier.height(8.dp))
                 ButtonRow {
@@ -122,9 +120,7 @@ fun HomeScreen(
         }
         if (!s.hasApiKey) {
             SectionCard("শুরু করতে Gemini API key দিন", Icons.Outlined.Key) {
-                InfoText("আপনার নিজের বিনামূল্যের Gemini API key লাগবে। এটি শুধু এই ফোনে, এনক্রিপ্ট করে রাখা হয়।")
-                Spacer(Modifier.height(8.dp))
-                PillButton("Settings-এ API key দিন", Icons.Outlined.Key, filled = true, onClick = onOpenSettings)
+                PillButton("API key দিন", Icons.Outlined.Key, filled = true, onClick = onOpenSettings)
             }
         }
         PermissionCard(tick, perms)
@@ -140,10 +136,7 @@ fun HomeScreen(
             Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Layers, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(9.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("ভাসমান মাইক", style = MaterialTheme.typography.titleSmall)
-                    InfoText("WhatsApp, Messenger, Gmail-সহ যেকোনো অ্যাপের উপরে")
-                }
+                Text("ভাসমান মাইক", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 Switch(checked = s.bubbleEnabled, onCheckedChange = setBubble)
             }
         }
@@ -177,7 +170,7 @@ fun HomeScreen(
         if (show != null && st !is EngineState.Recording && st !is EngineState.Processing) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (done != null) "নতুন লেখা" else "সর্বশেষ লেখা",
+                    if (done != null) "নতুন লেখা" else "সর্বশেষ",
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 )
@@ -213,24 +206,20 @@ private fun RecorderCard(st: EngineState, onMic: () -> Unit, onCancel: () -> Uni
         border = BorderStroke(1.dp, c.outlineVariant),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Box(
-            Modifier.fillMaxWidth().background(
-                Brush.verticalGradient(listOf(brand.main.copy(alpha = 0.10f), Color.Transparent))
-            )
-        ) {
+        Box(Modifier.fillMaxWidth()) {
             Column(
                 Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 AnimatedContent(
                     targetState = when (st) {
-                        is EngineState.Recording -> "শুনছি… স্বাভাবিকভাবে বলতে থাকুন"
-                        is EngineState.Processing -> if (st.parts > 1) "লেখা তৈরি হচ্ছে… (অংশ ${st.part}/${st.parts})" else "লেখা তৈরি হচ্ছে…"
-                        else -> "বাংলায় বলুন — আমি লিখে দেব"
+                        is EngineState.Recording -> "শুনছি…"
+                        is EngineState.Processing -> if (st.parts > 1) "লেখা তৈরি হচ্ছে… ${st.part}/${st.parts}" else "লেখা তৈরি হচ্ছে…"
+                        else -> "ট্যাপ করে বলুন"
                     },
                     transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(100)) },
                     label = "title",
-                ) { t -> Text(t, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center) }
+                ) { t -> Text(t, style = MaterialTheme.typography.titleMedium, color = c.onSurfaceVariant, textAlign = TextAlign.Center) }
                 Spacer(Modifier.height(12.dp))
 
                 BigMic(st, onMic)
@@ -243,14 +232,11 @@ private fun RecorderCard(st: EngineState, onMic: () -> Unit, onCancel: () -> Uni
                         LevelBars(levels)
                         Spacer(Modifier.height(10.dp))
                         ButtonRow {
-                            PillButton("থামান ও লেখা তৈরি", Icons.Rounded.Stop, Modifier.weight(1.4f), filled = true, onClick = onMic)
+                            PillButton("থামান", Icons.Rounded.Stop, Modifier.weight(1.4f), filled = true, onClick = onMic)
                             PillButton("বাতিল", Icons.Outlined.Close, Modifier.weight(0.8f), color = c.error, onClick = onCancel)
                         }
                     }
-                    is EngineState.Processing -> {
-                        InfoText("Gemini AI আপনার কথা শুনে বানান, ব্যাকরণ ও যতিচিহ্ন ঠিক করছে, সাথে ইংরেজি অনুবাদও।", c.onSurfaceVariant)
-                    }
-                    else -> InfoText("মাইকে চাপ দিন, কথা বলুন, শেষ হলে আবার চাপ দিন। যত লম্বা খুশি বলতে পারেন।")
+                    else -> Unit
                 }
             }
         }
@@ -274,8 +260,6 @@ private fun BigMic(st: EngineState, onClick: () -> Unit) {
         if (recording) {
             Box(Modifier.size(size).scale(pulse).alpha(pulseA).clip(CircleShape).background(Color(0xFFEF4444)))
             Box(Modifier.size(size).scale(lv).clip(CircleShape).background(Color(0x40EF4444)))
-        } else if (!processing) {
-            Box(Modifier.size(size).scale(pulse * 0.92f).alpha(pulseA * 0.35f).clip(CircleShape).background(brand.main))
         }
         Box(
             Modifier.size(size).shadow(10.dp, CircleShape).clip(CircleShape).background(brush).pressClick(onClick = onClick),

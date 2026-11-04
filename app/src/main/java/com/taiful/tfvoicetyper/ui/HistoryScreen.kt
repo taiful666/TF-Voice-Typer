@@ -141,7 +141,6 @@ fun HistoryScreen(vm: MainViewModel, onOpen: (Long) -> Unit) {
                 Icon(Icons.Outlined.History, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.outline)
                 Spacer(Modifier.height(8.dp))
                 Text(if (q.isBlank()) "এখনো কোনো লেখা নেই" else "কিছু পাওয়া যায়নি", style = MaterialTheme.typography.titleMedium)
-                InfoText(if (q.isBlank()) "রেকর্ড করলে সব লেখা এখানে জমা থাকবে, যতক্ষণ না আপনি মুছে দেন।" else "অন্য শব্দ দিয়ে খুঁজে দেখুন")
             }
             return@Column
         }

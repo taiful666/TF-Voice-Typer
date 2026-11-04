@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -91,6 +92,8 @@ import kotlin.math.hypot
 import kotlin.math.max
 
 /** Draws the floating mic, the "drop here to remove" target, and the small result panel. */
+private const val WAVE_BARS = 16
+
 class OverlayController(
     private val service: VoiceService,
     private val app: TFApp,
@@ -105,6 +108,9 @@ class OverlayController(
     private var pressed by mutableStateOf(false)
     private var overTarget by mutableStateOf(false)
     private var targetShown by mutableStateOf(false)
+    private var wide by mutableStateOf(false)          // recording → mic grows into a pill (wave + time)
+    private var copiedWhat by mutableStateOf<String?>(null)
+    private val levels = androidx.compose.runtime.mutableStateListOf<Float>().apply { repeat(WAVE_BARS) { add(0f) } }
 
     private var bubble: View? = null
     private var bubbleParams: WindowManager.LayoutParams? = null
@@ -115,6 +121,8 @@ class OverlayController(
     private val overlayType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
 
     private fun windowSizePx() = dp(settings.bubbleSizeDp + 18)
+    private fun pillWidthPx() = dp(settings.bubbleSizeDp + 18 + 112)
+    private fun windowWidthPx() = if (wide) pillWidthPx() else windowSizePx()
 
     private fun screen(): Pair<Int, Int> {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -183,16 +191,37 @@ class OverlayController(
         settings = s
         if (old.bubbleSizeDp != s.bubbleSizeDp) {
             val p = bubbleParams ?: return
-            p.width = windowSizePx(); p.height = windowSizePx()
+            p.width = windowWidthPx(); p.height = windowSizePx()
             update()
         }
     }
 
     fun onEngineState(st: EngineState) {
+        val wasRecording = engineState is EngineState.Recording
         engineState = st
+        if (st is EngineState.Recording) {
+            if (!wasRecording) for (i in levels.indices) levels[i] = 0f
+            levels.removeAt(0); levels.add(st.level.coerceIn(0f, 1f))
+        }
+        setWide(st is EngineState.Recording)
         val wantPanel = (st is EngineState.Done && st.source == Source.BUBBLE) ||
             (st is EngineState.Error && st.source == Source.BUBBLE)
         if (wantPanel && bubble != null) showPanel() else hidePanel()
+    }
+
+    /** Grows the round mic into a pill while recording (keeps it on the same screen edge). */
+    private fun setWide(w: Boolean) {
+        if (w == wide) return
+        val p = bubbleParams
+        if (p == null || bubble == null) { wide = w; return }
+        snapAnim?.cancel()
+        val (sw, _) = screen()
+        val onRight = p.x + p.width / 2 > sw / 2
+        wide = w
+        val newW = windowWidthPx()
+        p.width = newW
+        p.x = if (onRight) sw - newW else p.x.coerceIn(0, max(0, sw - newW))
+        update()
     }
 
     private var downX = 0f
@@ -303,48 +332,89 @@ class OverlayController(
     @Composable
     private fun BubbleUi() {
         val st = engineState
+        if (st is EngineState.Recording && wide) { RecordingPill(st); return }
         val brand = LocalBrand.current
         val sizeDp = settings.bubbleSizeDp.dp
-        val recording = st is EngineState.Recording
-        val busy = recording || st is EngineState.Processing
+        val busy = st is EngineState.Processing
         val pressScale by animateFloatAsState(if (pressed) 0.88f else 1f, tween(120), label = "p")
-        val inf = rememberInfiniteTransition(label = "pulse")
-        val pulse by inf.animateFloat(1f, 1.32f, infiniteRepeatable(tween(900), RepeatMode.Restart), label = "pr")
-        val pulseAlpha by inf.animateFloat(0.55f, 0f, infiniteRepeatable(tween(900), RepeatMode.Restart), label = "pa")
-        val level = (st as? EngineState.Recording)?.level ?: 0f
-        val levelScale by animateFloatAsState(1f + level * 0.28f, tween(90), label = "lv")
-        val brush = when {
-            recording -> Brush.linearGradient(listOf(Color(0xFFF05252), Color(0xFFB91C1C)))
-            else -> Brush.linearGradient(brand.gradient)
-        }
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            if (recording) {
-                Box(Modifier.size(sizeDp).scale(pulse).alpha(pulseAlpha).clip(CircleShape).background(Color(0xFFEF4444)))
-                Box(Modifier.size(sizeDp).scale(levelScale).clip(CircleShape).background(Color(0x55EF4444)))
-            }
             Box(
                 Modifier
                     .size(sizeDp)
                     .scale(pressScale)
-                    .alpha(if (busy) 1f else settings.bubbleAlpha)
+                    .alpha(if (busy || st is EngineState.Done) 1f else settings.bubbleAlpha)
                     .shadow(6.dp, CircleShape)
                     .clip(CircleShape)
-                    .background(brush)
+                    .background(Brush.linearGradient(brand.gradient))
                     .border(1.5.dp, Color.White.copy(alpha = 0.35f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 val icon = (sizeDp.value * 0.46f).dp
                 when (st) {
-                    is EngineState.Recording -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Rounded.Stop, "থামান", Modifier.size(icon * 0.8f), tint = Color.White)
-                        Text(Fmt.duration(st.elapsedMs), color = Color.White, fontSize = (sizeDp.value * 0.17f).sp, lineHeight = (sizeDp.value * 0.19f).sp, fontWeight = FontWeight.Bold)
-                    }
                     is EngineState.Processing -> CircularProgressIndicator(Modifier.size(icon), color = Color.White, strokeWidth = 2.5.dp)
                     is EngineState.Done -> Icon(Icons.Rounded.Check, null, Modifier.size(icon), tint = Color.White)
                     else -> Icon(Icons.Rounded.Mic, "রেকর্ড", Modifier.size(icon), tint = Color.White)
                 }
             }
         }
+    }
+
+    /** Recording: dark pill with a red stop button, a live voice wave and the running time. */
+    @Composable
+    private fun RecordingPill(st: EngineState.Recording) {
+        val h = settings.bubbleSizeDp.dp
+        val pressScale by animateFloatAsState(if (pressed) 0.95f else 1f, tween(120), label = "pp")
+        val inf = rememberInfiniteTransition(label = "dot")
+        val blink by inf.animateFloat(1f, 0.25f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "b")
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Row(
+                Modifier
+                    .padding(horizontal = 9.dp)
+                    .fillMaxWidth()
+                    .height(h)
+                    .scale(pressScale)
+                    .shadow(8.dp, RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(50))
+                    .background(Color(0xF2121619))
+                    .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(50))
+                    .padding(start = 5.dp, end = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(h - 10.dp).clip(CircleShape)
+                        .background(Brush.linearGradient(listOf(Color(0xFFF05252), Color(0xFFC81E1E)))),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(Modifier.size((h.value * 0.26f).dp).clip(RoundedCornerShape(3.dp)).background(Color.White))
+                }
+                Spacer(Modifier.width(8.dp))
+                Row(
+                    Modifier.weight(1f).height(h * 0.62f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    levels.forEach { l -> WaveBar(l, h * 0.62f) }
+                }
+                Spacer(Modifier.width(7.dp))
+                Box(Modifier.size(6.dp).alpha(blink).clip(CircleShape).background(Color(0xFFF05252)))
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    Fmt.duration(st.elapsedMs), color = Color.White,
+                    fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                    style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
+                )
+            }
+        }
+    }
+
+    @Composable
+    private fun androidx.compose.foundation.layout.RowScope.WaveBar(level: Float, maxH: androidx.compose.ui.unit.Dp) {
+        val target = (0.12f + level * 0.88f).coerceIn(0.12f, 1f)
+        val f by animateFloatAsState(target, tween(110), label = "w")
+        Box(
+            Modifier.weight(1f).height(maxH * f).clip(RoundedCornerShape(50))
+                .background(Color.White.copy(alpha = 0.45f + f * 0.55f))
+        )
     }
 
     // ------------------------------------------------------------------ remove target
@@ -418,73 +488,94 @@ class OverlayController(
         runCatching { service.startActivity(i) }
     }
 
+    /** Copies the text, shows "কপি হয়েছে ✓" for a moment, then closes the panel so the user can paste right away. */
+    private fun copyAndClose(text: String, what: String) {
+        if (text.isBlank() || copiedWhat != null) return
+        Clip.copy(service, text, what, toast = false)
+        panel?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+        copiedWhat = what
+        service.lifecycleScope.launch {
+            kotlinx.coroutines.delay(650)
+            app.engine.dismiss()
+            copiedWhat = null
+            Toast.makeText(service, "$what কপি হয়েছে ✓ — যেখানে চান পেস্ট করুন", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     @Composable
     private fun PanelUi() {
         val st = engineState
-        val ctx = service
+        val c = MaterialTheme.colorScheme
         Surface(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp),
-            shape = RoundedCornerShape(18.dp),
-            color = MaterialTheme.colorScheme.surface,
-            shadowElevation = 10.dp,
+            shape = RoundedCornerShape(20.dp),
+            color = c.surface,
+            shadowElevation = 12.dp,
             tonalElevation = 2.dp,
         ) {
-            Column(Modifier.padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    LogoMark(20.dp)
-                    Spacer(Modifier.width(7.dp))
-                    Text(
-                        if (st is EngineState.Error) "লেখা তৈরি হয়নি" else "আপনার লেখা তৈরি ✓",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = if (st is EngineState.Error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    IconButton(onClick = { app.engine.dismiss() }, modifier = Modifier.size(34.dp)) {
-                        Icon(Icons.Outlined.Close, "বন্ধ", Modifier.size(19.dp))
+            Box {
+                Column(Modifier.padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LogoMark(20.dp)
+                        Spacer(Modifier.width(7.dp))
+                        Text(
+                            if (st is EngineState.Error) "লেখা তৈরি হয়নি" else "লেখা তৈরি",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = if (st is EngineState.Error) c.error else c.onSurface,
+                            modifier = Modifier.weight(1f),
+                        )
+                        val rid = (st as? EngineState.Done)?.record?.id ?: (st as? EngineState.Error)?.recordId
+                        IconButton(onClick = { openApp(rid); app.engine.dismiss() }, modifier = Modifier.size(34.dp)) {
+                            Icon(Icons.Outlined.OpenInNew, "অ্যাপে খুলুন", Modifier.size(18.dp), tint = c.onSurfaceVariant)
+                        }
+                        IconButton(onClick = { app.engine.dismiss() }, modifier = Modifier.size(34.dp)) {
+                            Icon(Icons.Outlined.Close, "বন্ধ", Modifier.size(19.dp), tint = c.onSurfaceVariant)
+                        }
+                    }
+                    Spacer(Modifier.size(2.dp))
+                    Column(Modifier.padding(end = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        when (st) {
+                            is EngineState.Done -> {
+                                val r = st.record
+                                PanelText("বাংলা", r.bangla, c.primary, 128, autoCopied = settings.autoCopy) { copyAndClose(r.bangla, "বাংলা লেখা") }
+                                if (r.english.isNotBlank()) {
+                                    PanelText("English", r.english, c.secondary, 92) { copyAndClose(r.english, "English text") }
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                        PillButton("দুটোই কপি", Icons.Outlined.ContentCopy) { copyAndClose(Clip.both(r.bangla, r.english), "দুটো লেখা") }
+                                    }
+                                }
+                            }
+                            is EngineState.Error -> {
+                                Row(verticalAlignment = Alignment.Top) {
+                                    Icon(Icons.Outlined.ErrorOutline, null, Modifier.size(18.dp), tint = c.error)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(st.message, style = MaterialTheme.typography.bodyMedium, color = c.onSurface)
+                                }
+                                val id = st.recordId
+                                if (id != null) Row {
+                                    PillButton("আবার চেষ্টা", Icons.Outlined.Refresh, filled = true) { app.engine.retry(id, Source.BUBBLE) }
+                                }
+                            }
+                            else -> Unit
+                        }
                     }
                 }
-                Column(Modifier.padding(end = 6.dp)) {
-                    when (st) {
-                        is EngineState.Done -> {
-                            val r = st.record
-                            PanelText("বাংলা সংস্করণ", r.bangla, MaterialTheme.colorScheme.primary, 128) { Clip.copy(ctx, r.bangla, "বাংলা লেখা") }
-                            if (r.english.isNotBlank()) {
-                                Spacer(Modifier.size(6.dp))
-                                PanelText("English Version", r.english, MaterialTheme.colorScheme.secondary, 92) { Clip.copy(ctx, r.english, "English text") }
-                            }
-                            Spacer(Modifier.size(8.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                                PillButton("বাংলা", Icons.Outlined.ContentCopy, Modifier.weight(1f), filled = true) { Clip.copy(ctx, r.bangla, "বাংলা লেখা") }
-                                PillButton("English", Icons.Outlined.ContentCopy, Modifier.weight(1f), filled = true, color = MaterialTheme.colorScheme.secondary, enabled = r.english.isNotBlank()) {
-                                    Clip.copy(ctx, r.english, "English text")
-                                }
-                                PillButton("দুটোই", Icons.Outlined.ContentCopy, Modifier.weight(1f)) { Clip.copy(ctx, Clip.both(r.bangla, r.english), "দুটো লেখা") }
-                            }
-                            Spacer(Modifier.size(6.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    if (settings.autoCopy) "বাংলা লেখা কপি হয়ে গেছে — যেখানে চান পেস্ট করুন" else "কার্ডে ট্যাপ করলেই কপি হবে",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                PillButton("এডিট", Icons.Outlined.OpenInNew) { openApp(r.id); app.engine.dismiss() }
-                            }
+                // "Copied" confirmation flash
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = copiedWhat != null,
+                    enter = androidx.compose.animation.fadeIn(tween(120)) + androidx.compose.animation.scaleIn(tween(160), initialScale = 0.9f),
+                    exit = androidx.compose.animation.fadeOut(tween(100)),
+                    modifier = Modifier.matchParentSize(),
+                ) {
+                    Box(Modifier.fillMaxSize().background(c.surface.copy(alpha = 0.94f)), contentAlignment = Alignment.Center) {
+                        Row(
+                            Modifier.clip(RoundedCornerShape(50)).background(c.primary).padding(horizontal = 18.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Rounded.Check, null, Modifier.size(20.dp), tint = c.onPrimary)
+                            Spacer(Modifier.width(7.dp))
+                            Text("কপি হয়েছে", color = c.onPrimary, style = MaterialTheme.typography.titleSmall)
                         }
-                        is EngineState.Error -> {
-                            Row(verticalAlignment = Alignment.Top) {
-                                Icon(Icons.Outlined.ErrorOutline, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
-                                Spacer(Modifier.width(6.dp))
-                                Text(st.message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-                            }
-                            Spacer(Modifier.size(8.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                val id = st.recordId
-                                if (id != null) PillButton("আবার চেষ্টা", Icons.Outlined.Refresh, filled = true) { app.engine.retry(id, Source.BUBBLE) }
-                                PillButton("অ্যাপ খুলুন", Icons.Outlined.OpenInNew) { openApp(id); app.engine.dismiss() }
-                            }
-                        }
-                        else -> Unit
                     }
                 }
             }
@@ -492,12 +583,20 @@ class OverlayController(
     }
 
     @Composable
-    private fun PanelText(title: String, text: String, accent: Color, maxH: Int, onCopy: () -> Unit) {
+    private fun PanelText(title: String, text: String, accent: Color, maxH: Int, autoCopied: Boolean = false, onCopy: () -> Unit) {
         Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(accent.copy(alpha = 0.07f))
-                .pressClick(onClick = onCopy).padding(horizontal = 9.dp, vertical = 6.dp)
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(accent.copy(alpha = 0.07f))
+                .pressClick(onClick = onCopy).padding(start = 10.dp, end = 8.dp, top = 6.dp, bottom = 8.dp)
         ) {
-            Text(title, style = MaterialTheme.typography.labelMedium, color = accent, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, style = MaterialTheme.typography.labelMedium, color = accent, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                if (autoCopied) {
+                    Text("কপি করা আছে", style = MaterialTheme.typography.labelSmall, color = accent)
+                    Spacer(Modifier.width(6.dp))
+                }
+                Icon(Icons.Outlined.ContentCopy, "কপি", Modifier.size(15.dp), tint = accent)
+            }
+            Spacer(Modifier.size(2.dp))
             Box(Modifier.heightIn(max = maxH.dp).verticalScroll(rememberScrollState())) {
                 Text(text, style = TranscriptStyle.copy(fontSize = 14.5.sp, lineHeight = 19.5.sp), color = MaterialTheme.colorScheme.onSurface)
             }

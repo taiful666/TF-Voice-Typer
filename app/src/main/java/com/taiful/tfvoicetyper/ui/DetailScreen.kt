@@ -116,7 +116,6 @@ fun DetailScreen(vm: MainViewModel, id: Long, onBack: () -> Unit) {
                 }
                 if (rec.isDone && rec.audioDir.isNotEmpty() && !busyHere) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        InfoText("ফলাফল পছন্দ না হলে একই অডিও থেকে আবার লেখা বানাতে পারেন।")
                     }
                     PillButton("আবার লেখা তৈরি করুন", Icons.Outlined.Refresh) { vm.tf.engine.retry(rec.id) }
                 }

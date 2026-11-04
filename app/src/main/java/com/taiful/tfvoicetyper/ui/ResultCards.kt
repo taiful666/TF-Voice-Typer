@@ -88,6 +88,9 @@ private fun TextCard(
     onSave: (String) -> Unit,
 ) {
     var editing by remember(key) { mutableStateOf(false) }
+    var copied by remember(key) { mutableStateOf(0) }
+    LaunchedEffect(copied) { if (copied > 0) { kotlinx.coroutines.delay(1400); copied = 0 } }
+    val doCopy: () -> Unit = { onCopy(); copied += 1 }
     var draft by remember(key, text) { mutableStateOf(text) }
     LaunchedEffect(text) { if (!editing) draft = text }
     Surface(
@@ -115,8 +118,10 @@ private fun TextCard(
                     IconButton(onClick = { editing = true }, modifier = Modifier.size(34.dp)) {
                         Icon(Icons.Outlined.Edit, "সম্পাদনা", Modifier.size(17.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    IconButton(onClick = onCopy, modifier = Modifier.size(34.dp)) {
-                        Icon(Icons.Outlined.ContentCopy, "কপি", Modifier.size(17.dp), tint = accent)
+                    IconButton(onClick = doCopy, modifier = Modifier.size(34.dp)) {
+                        androidx.compose.animation.Crossfade(copied > 0, label = "cp") { ok ->
+                            Icon(if (ok) Icons.Outlined.Check else Icons.Outlined.ContentCopy, "কপি", Modifier.size(17.dp), tint = accent)
+                        }
                     }
                 }
             }
@@ -133,17 +138,9 @@ private fun TextCard(
                     text.ifBlank { "—" },
                     style = TranscriptStyle,
                     color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.fillMaxWidth().pressClick(onClick = onCopy).padding(horizontal = 11.dp, vertical = 8.dp),
+                    modifier = Modifier.fillMaxWidth().pressClick(onClick = doCopy).padding(horizontal = 11.dp, vertical = 8.dp),
                 )
-                AnimatedVisibility(text.isNotBlank()) {
-                    Text(
-                        "কার্ডে ট্যাপ করলেই পুরো লেখা কপি হবে",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        modifier = Modifier.padding(start = 11.dp, bottom = 6.dp),
-                    )
-                }
-                Spacer(Modifier.height(0.dp))
+
             }
         }
     }

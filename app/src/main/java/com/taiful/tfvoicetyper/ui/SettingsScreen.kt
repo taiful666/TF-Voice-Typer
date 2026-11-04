@@ -160,8 +160,6 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, setBubble: (Boolean) -> Un
             PillButton("বিনামূল্যে API key কোথায় পাবেন?", Icons.Outlined.OpenInNew) {
                 runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey"))) }
             }
-            Spacer(Modifier.height(4.dp))
-            InfoText("Google AI Studio খুলে Google অ্যাকাউন্ট দিয়ে ঢুকুন → \"Create API key\" চাপুন → key কপি করে উপরে পেস্ট করুন → সংরক্ষণ → পরীক্ষা।")
 
             Spacer(Modifier.height(12.dp))
             Text("AI মডেল", style = MaterialTheme.typography.titleSmall)
@@ -210,8 +208,6 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, setBubble: (Boolean) -> Un
                 Spacer(Modifier.height(4.dp))
                 Text(t, style = MaterialTheme.typography.bodySmall, color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
             }
-            Spacer(Modifier.height(4.dp))
-            InfoText("প্রস্তাবিত: gemini-flash-latest (দ্রুত, সবসময় নতুন সংস্করণ)। বেশি নির্ভুলতা চাইলে Pro মডেল (ধীর, সীমা কম)।")
         }
 
         // ---------------- Theme ----------------
@@ -246,25 +242,22 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, setBubble: (Boolean) -> Un
 
         // ---------------- Floating mic ----------------
         SectionCard("ভাসমান মাইক", Icons.Outlined.Layers) {
-            SwitchRow("ভাসমান মাইক চালু", "অন্য অ্যাপের উপরে ছোট গোল মাইক থাকবে", s.bubbleEnabled, setBubble)
+            SwitchRow("ভাসমান মাইক চালু", null, s.bubbleEnabled, setBubble)
             var size by remember(s.bubbleSizeDp) { mutableFloatStateOf(s.bubbleSizeDp.toFloat()) }
             var alpha by remember(s.bubbleAlpha) { mutableFloatStateOf(s.bubbleAlpha) }
             Spacer(Modifier.height(4.dp))
             SliderRow("আকার", "${size.toInt()}", size, 44f..80f, steps = 8, onChange = { size = it }) { vm.set(SettingsRepo.K.bubbleSize, size.toInt()) }
             SliderRow("স্বচ্ছতা", "${(alpha * 100).toInt()}%", alpha, 0.3f..1f, steps = 6, onChange = { alpha = it }) { vm.set(SettingsRepo.K.bubbleAlpha, alpha) }
-            InfoText("মাইক টেনে যেকোনো জায়গায় সরান। টেনে নিচের লাল চিহ্নে ছেড়ে দিলে মাইক বন্ধ হবে।")
         }
 
         // ---------------- Text ----------------
         SectionCard("লেখা ও অনুবাদ", Icons.Outlined.Translate) {
-            SwitchRow("ইংরেজি অনুবাদ", "বাংলার সাথে English Version-ও তৈরি হবে", s.translate) { vm.set(SettingsRepo.K.translate, it) }
-            SwitchRow("ভাসমান মাইকে অটো-কপি", "লেখা তৈরি হলেই বাংলা লেখা কপি হয়ে যাবে — সরাসরি পেস্ট করুন", s.autoCopy) { vm.set(SettingsRepo.K.autoCopy, it) }
+            SwitchRow("ইংরেজি অনুবাদ", null, s.translate) { vm.set(SettingsRepo.K.translate, it) }
+            SwitchRow("ভাসমান মাইকে অটো-কপি", null, s.autoCopy) { vm.set(SettingsRepo.K.autoCopy, it) }
         }
 
         // ---------------- Audio ----------------
         SectionCard("অডিও সংরক্ষণ", Icons.Outlined.AudioFile) {
-            InfoText("লেখা সবসময় হিস্টরিতে থাকে। শুধু অডিও কতদিন রাখবে তা বেছে নিন (ফোনের জায়গা বাঁচাতে)। ব্যর্থ রেকর্ডিংয়ের অডিও কখনো নিজে মোছে না।")
-            Spacer(Modifier.height(2.dp))
             listOf(0 to "লেখা তৈরি হলেই মুছে ফেলুন", 7 to "৭ দিন রাখুন", 30 to "৩০ দিন রাখুন", -1 to "সবসময় রাখুন").forEach { (v, label) ->
                 Row(
                     Modifier.fillMaxWidth().height(36.dp).clip(RoundedCornerShape(10.dp))
@@ -302,7 +295,17 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, setBubble: (Boolean) -> Un
 
         // ---------------- Privacy ----------------
         SectionCard("গোপনীয়তা", Icons.Outlined.PrivacyTip) {
-            InfoText(
+            var more by remember { mutableStateOf(false) }
+            Text(
+                "API key ও হিস্টরি শুধু এই ফোনে থাকে। অডিও শুধু Google Gemini-তে যায়।",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                if (more) "কম দেখুন" else "বিস্তারিত",
+                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).pressClick { more = !more }.padding(vertical = 6.dp, horizontal = 2.dp),
+            )
+            if (more) InfoText(
                 "• আপনার API key শুধু এই ফোনে Android Keystore দিয়ে এনক্রিপ্ট করে রাখা হয় — কোথাও আপলোড হয় না।\n" +
                     "• রেকর্ড করা অডিও শুধু লেখা তৈরির জন্য সরাসরি Google Gemini-তে পাঠানো হয়; অন্য কোনো সার্ভারে নয়।\n" +
                     "• হিস্টরি ও অডিও শুধু এই ফোনে থাকে; ফোনের ক্লাউড ব্যাকআপেও যায় না।\n" +
@@ -316,8 +319,6 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, setBubble: (Boolean) -> Un
         // ---------------- About ----------------
         SectionCard("অ্যাপ সম্পর্কে", Icons.Outlined.Info) {
             FullLogo(markSize = 42.dp)
-            Spacer(Modifier.height(6.dp))
-            InfoText("বাংলায় বলুন, নির্ভুল বাংলা লেখা ও ইংরেজি অনুবাদ পান — Google Gemini AI দিয়ে।")
             Spacer(Modifier.height(4.dp))
             Text("সংস্করণ ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -333,11 +334,11 @@ private fun modelHint(m: String): String? = when {
 }
 
 @Composable
-private fun SwitchRow(title: String, sub: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun SwitchRow(title: String, sub: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).padding(end = 8.dp)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
-            InfoText(sub)
+            if (sub != null) InfoText(sub)
         }
         Switch(checked = checked, onCheckedChange = onChange)
     }

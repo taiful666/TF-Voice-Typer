@@ -6,14 +6,14 @@ import android.content.Context
 import android.widget.Toast
 
 object Clip {
-    fun copy(context: Context, text: String, what: String) {
+    fun copy(context: Context, text: String, what: String, toast: Boolean = true) {
         if (text.isBlank()) {
             Toast.makeText(context, "কপি করার মতো লেখা নেই", Toast.LENGTH_SHORT).show()
             return
         }
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("TF Voice Typer", text))
-        Toast.makeText(context, "$what কপি হয়েছে ✓", Toast.LENGTH_SHORT).show()
+        if (toast) Toast.makeText(context, "$what কপি হয়েছে ✓", Toast.LENGTH_SHORT).show()
     }
 
     fun both(bangla: String, english: String): String =

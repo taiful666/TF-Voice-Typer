@@ -87,7 +87,7 @@ fun PermissionCard(tick: Int, perms: PermRequester) {
     val overlay = remember(tick) { Perm.overlay(ctx) }
     val notif = remember(tick) { Perm.notif(ctx) }
     if (mic && overlay && notif) return
-    SectionCard("কয়েকটি অনুমতি দরকার", Icons.Outlined.Shield) {
+    SectionCard("অনুমতি দরকার", Icons.Outlined.Shield) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (!mic) PermRow(Icons.Outlined.Mic, "মাইক্রোফোন", "আপনার কথা রেকর্ড করার জন্য (জরুরি)") { perms.requestMic() }
             if (!overlay) PermRow(Icons.Outlined.Layers, "অন্য অ্যাপের উপরে দেখানো", "WhatsApp, Messenger ইত্যাদির উপরে ভাসমান মাইক দেখাতে") { Perm.openOverlaySettings(ctx) }
@@ -101,10 +101,7 @@ private fun PermRow(icon: ImageVector, title: String, why: String, onClick: () -
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.width(9.dp))
-        Column(Modifier.weight(1f).padding(end = 6.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            InfoText(why)
-        }
+        Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f).padding(end = 6.dp))
         PillButton("অনুমতি দিন", filled = true, onClick = onClick)
     }
 }
