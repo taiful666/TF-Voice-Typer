@@ -1,0 +1,15 @@
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+*.apk
+*.aab
+# Signing keys and secrets must never be committed
+*.jks
+*.keystore
+*.p12
+signing/
+keystore.properties
+.env
+*.key
