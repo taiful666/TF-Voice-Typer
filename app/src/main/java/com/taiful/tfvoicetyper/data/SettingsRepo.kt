@@ -28,6 +28,8 @@ data class AppSettings(
     val bubbleEnabled: Boolean = false,
     val bubbleAlpha: Float = 0.7f,
     val bubbleSizeDp: Int = 52,
+    /** float = full round button always shown; edge = tucks into the screen edge as a small tab */
+    val bubbleStyle: String = STYLE_FLOAT,
     /** 0 = delete after success, -1 = keep forever, otherwise days */
     val audioRetentionDays: Int = 7,
     val theme: String = "emerald",
@@ -39,6 +41,8 @@ data class AppSettings(
         const val ENGINE_AUTO = "auto"
         const val ENGINE_GROQ = "groq"
         const val ENGINE_PHONE = "phone"
+        const val STYLE_FLOAT = "float"
+        const val STYLE_EDGE = "edge"
     }
 }
 
@@ -55,6 +59,7 @@ class SettingsRepo(private val context: Context) {
         val bubbleEnabled = booleanPreferencesKey("bubble_enabled")
         val bubbleAlpha = floatPreferencesKey("bubble_alpha")
         val bubbleSize = intPreferencesKey("bubble_size")
+        val bubbleStyle = stringPreferencesKey("bubble_style")
         val retention = intPreferencesKey("audio_retention")
         val theme = stringPreferencesKey("theme")
         val darkMode = intPreferencesKey("dark_mode")
@@ -74,6 +79,7 @@ class SettingsRepo(private val context: Context) {
             bubbleEnabled = p[K.bubbleEnabled] ?: false,
             bubbleAlpha = p[K.bubbleAlpha] ?: 0.7f,
             bubbleSizeDp = p[K.bubbleSize] ?: 52,
+            bubbleStyle = p[K.bubbleStyle] ?: AppSettings.STYLE_FLOAT,
             audioRetentionDays = p[K.retention] ?: 7,
             theme = p[K.theme] ?: "emerald",
             darkMode = p[K.darkMode] ?: 0,

@@ -74,6 +74,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.rounded.Mic
 import com.taiful.tfvoicetyper.BuildConfig
 import com.taiful.tfvoicetyper.data.AppSettings
 import com.taiful.tfvoicetyper.data.SettingsRepo
@@ -247,6 +249,20 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, setBubble: (Boolean) -> Un
         // ---------------- Floating mic ----------------
         SectionCard("ভাসমান মাইক", Icons.Outlined.Layers) {
             SwitchRow("ভাসমান মাইক চালু", null, s.bubbleEnabled, setBubble)
+            Spacer(Modifier.height(4.dp))
+            Text("বাটন কীভাবে থাকবে", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                BubbleStyleOption(
+                    title = "ভাসমান বাটন", hint = "পুরো বাটন সবসময় দেখা যাবে",
+                    edge = false, selected = s.bubbleStyle != AppSettings.STYLE_EDGE, modifier = Modifier.weight(1f),
+                ) { vm.set(SettingsRepo.K.bubbleStyle, AppSettings.STYLE_FLOAT) }
+                BubbleStyleOption(
+                    title = "কিনারায় লুকানো", hint = "পাশে ছোট্ট মাইক — ট্যাপ করলেই বের হয়ে রেকর্ড শুরু",
+                    edge = true, selected = s.bubbleStyle == AppSettings.STYLE_EDGE, modifier = Modifier.weight(1f),
+                ) { vm.set(SettingsRepo.K.bubbleStyle, AppSettings.STYLE_EDGE) }
+            }
+            Spacer(Modifier.height(4.dp))
             var size by remember(s.bubbleSizeDp) { mutableFloatStateOf(s.bubbleSizeDp.toFloat()) }
             var alpha by remember(s.bubbleAlpha) { mutableFloatStateOf(s.bubbleAlpha) }
             Spacer(Modifier.height(4.dp))
@@ -327,6 +343,67 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, setBubble: (Boolean) -> Un
             Text("সংস্করণ ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.height(6.dp))
+    }
+}
+
+/** One choice card with a tiny phone-screen preview of how the floating mic looks. */
+@Composable
+private fun BubbleStyleOption(
+    title: String,
+    hint: String,
+    edge: Boolean,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val c = MaterialTheme.colorScheme
+    val brand = LocalBrand.current
+    val shape = RoundedCornerShape(14.dp)
+    Column(
+        modifier
+            .clip(shape)
+            .background(if (selected) c.primary.copy(alpha = 0.08f) else c.surfaceContainerHigh.copy(alpha = 0.5f))
+            .border(if (selected) 2.dp else 1.dp, if (selected) c.primary else c.outlineVariant, shape)
+            .pressClick(onClick = onClick)
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        // mini phone screen
+        Box(
+            Modifier.width(54.dp).height(76.dp).clip(RoundedCornerShape(9.dp))
+                .background(c.surface).border(1.5.dp, c.outline.copy(alpha = 0.6f), RoundedCornerShape(9.dp)),
+        ) {
+            Column(Modifier.padding(start = 6.dp, top = 8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                listOf(30, 24, 34, 20).forEach { w ->
+                    Box(Modifier.width(w.dp).height(4.dp).clip(RoundedCornerShape(50)).background(c.outlineVariant))
+                }
+            }
+            if (edge) {
+                Box(
+                    Modifier.align(Alignment.CenterEnd).width(7.dp).height(22.dp)
+                        .clip(RoundedCornerShape(topStart = 6.dp, bottomStart = 6.dp))
+                        .background(Brush.verticalGradient(brand.gradient)),
+                )
+            } else {
+                Box(
+                    Modifier.align(Alignment.CenterEnd).padding(end = 3.dp).size(18.dp).clip(CircleShape)
+                        .background(Brush.linearGradient(brand.gradient)),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(androidx.compose.material.icons.Icons.Rounded.Mic, null, Modifier.size(11.dp), tint = Color.White) }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (selected) {
+                Icon(Icons.Rounded.Check, null, Modifier.size(15.dp), tint = c.primary)
+                Spacer(Modifier.width(3.dp))
+            }
+            Text(title, style = MaterialTheme.typography.labelLarge, color = if (selected) c.primary else c.onSurface, maxLines = 1)
+        }
+        Text(
+            hint, style = MaterialTheme.typography.labelSmall, color = c.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center, lineHeight = 13.sp,
+        )
     }
 }
 

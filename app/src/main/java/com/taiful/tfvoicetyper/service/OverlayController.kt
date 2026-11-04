@@ -1,10 +1,14 @@
 package com.taiful.tfvoicetyper.service
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
+import android.view.Display
 import android.os.Build
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
@@ -57,6 +61,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -86,6 +91,8 @@ import com.taiful.tfvoicetyper.ui.TFTheme
 import com.taiful.tfvoicetyper.ui.TranscriptStyle
 import com.taiful.tfvoicetyper.util.Clip
 import com.taiful.tfvoicetyper.util.Fmt
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.lifecycle.lifecycleScope
 import kotlin.math.hypot
@@ -99,7 +106,18 @@ class OverlayController(
     private val app: TFApp,
     private val onRemoved: () -> Unit,
 ) {
-    private val wm = service.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    private val serviceWm = service.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    /**
+     * Android 11+ wants overlay windows added through a "window context" (some Samsung phones are strict
+     * about this). If that ever fails we fall back to the service's own window manager, as before.
+     */
+    private val windowCtxWm: WindowManager? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) runCatching {
+        val display = service.getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY)
+        service.createDisplayContext(display)
+            .createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
+            .getSystemService(WindowManager::class.java)
+    }.getOrNull() else null
+    private var wm: WindowManager = windowCtxWm ?: serviceWm
     private val density = service.resources.displayMetrics.density
     private fun dp(v: Number): Int = (v.toFloat() * density + 0.5f).toInt()
 
@@ -118,20 +136,33 @@ class OverlayController(
     private var panel: View? = null
     private var snapAnim: ValueAnimator? = null
 
+    // ---- "edge" style: the mic tucks into the screen side as a small tab ----
+    private var tuckF by mutableFloatStateOf(0f)        // 0 = full round button, 1 = small edge tab
+    private var tuckRight by mutableStateOf(true)
+    private var tucked = false                          // where we are going (animation target)
+    private var restY = 0                               // y of the full button while tucked
+    private var tuckAnim: ValueAnimator? = null
+    private var tuckJob: Job? = null
+    private var tuckedAtDown = false
+
     private val overlayType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
 
     private fun windowSizePx() = dp(settings.bubbleSizeDp + 18)
     private fun pillWidthPx() = dp(settings.bubbleSizeDp + 18 + 112)
     private fun windowWidthPx() = if (wide) pillWidthPx() else windowSizePx()
 
+    private fun tabWPx() = dp(24)
+    private fun tabHPx() = dp(64)
+    private fun edgeMode() = settings.bubbleStyle == AppSettings.STYLE_EDGE
+
     private fun screen(): Pair<Int, Int> {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val b = wm.currentWindowMetrics.bounds
-            b.width() to b.height()
-        } else {
-            val dm = service.resources.displayMetrics
-            dm.widthPixels to dm.heightPixels
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            runCatching { wm.currentWindowMetrics.bounds }.getOrNull()?.let { b ->
+                if (b.width() > 0 && b.height() > 0) return b.width() to b.height()
+            }
         }
+        val dm = service.resources.displayMetrics
+        return dm.widthPixels to dm.heightPixels
     }
 
     private fun composeHost(content: @Composable () -> Unit): FrameLayout {
@@ -173,17 +204,33 @@ class OverlayController(
         host.setViewTreeSavedStateRegistryOwner(service)
         host.addView(ComposeView(service).apply {
             id = View.generateViewId()
-            setContent { TFTheme(settings.theme, settings.darkMode) { BubbleUi() } }
+            setContent { TFTheme(settings.theme, settings.darkMode) { BubbleRoot() } }
         })
-        createTarget() // added first, so the bubble always stays on top of it
-        bubble = host
-        bubbleParams = params
-        try {
-            wm.addView(host, params)
-        } catch (e: Exception) {
-            bubble = null
-            Toast.makeText(service, "ভাসমান মাইক দেখানো যায়নি: ${e.message}", Toast.LENGTH_LONG).show()
+        val managers = listOfNotNull(windowCtxWm, serviceWm).distinct()
+        var lastError: Exception? = null
+        for (m in managers) {
+            wm = m
+            createTarget() // added first, so the bubble always stays on top of it
+            try {
+                wm.addView(host, params)
+                bubble = host
+                bubbleParams = params
+                restY = params.y
+                lastError = null
+                break
+            } catch (e: Exception) {
+                lastError = e
+                target?.let { t -> runCatching { wm.removeView(t) } }
+                target = null
+            }
         }
+        if (lastError != null) {
+            bubble = null
+            app.saveProblem("ভাসমান মাইক দেখানো", lastError)
+            Toast.makeText(service, "ভাসমান মাইক দেখানো যায়নি: ${lastError.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (edgeMode()) scheduleTuck(1500)
     }
 
     fun onSettings(s: AppSettings) {
@@ -191,9 +238,24 @@ class OverlayController(
         settings = s
         if (old.bubbleSizeDp != s.bubbleSizeDp) {
             val p = bubbleParams ?: return
-            p.width = windowWidthPx(); p.height = windowSizePx()
-            update()
+            if (tucked || tuckF > 0f) applyTuckGeometry(tuckF)
+            else { p.width = windowWidthPx(); p.height = windowSizePx(); update() }
         }
+        if (old.bubbleStyle != s.bubbleStyle) {
+            if (edgeMode()) scheduleTuck(700)
+            else { tuckJob?.cancel(); if (tucked || tuckF > 0f) animateTuck(false) }
+        }
+    }
+
+    private var prevState: EngineState = EngineState.Idle
+
+    /** True while the floating mic itself is recording / working / showing its result. */
+    private fun bubbleBusy(st: EngineState) = when (st) {
+        is EngineState.Recording -> st.source == Source.BUBBLE
+        is EngineState.Processing -> st.source == Source.BUBBLE
+        is EngineState.Done -> st.source == Source.BUBBLE
+        is EngineState.Error -> st.source == Source.BUBBLE
+        EngineState.Idle -> false
     }
 
     fun onEngineState(st: EngineState) {
@@ -204,6 +266,14 @@ class OverlayController(
             levels.removeAt(0); levels.add(st.level.coerceIn(0f, 1f))
         }
         applyPillMode(false) // recording stays inside the round button
+        val busy = bubbleBusy(st)
+        if (busy) {
+            tuckJob?.cancel()
+            if (tucked) animateTuck(false)
+        } else if (bubbleBusy(prevState)) {
+            scheduleTuck()
+        }
+        prevState = st
         val wantPanel = (st is EngineState.Done && st.source == Source.BUBBLE) ||
             (st is EngineState.Error && st.source == Source.BUBBLE)
         if (wantPanel && bubble != null) showPanel() else hidePanel()
@@ -236,6 +306,9 @@ class OverlayController(
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 snapAnim?.cancel()
+                tuckJob?.cancel()
+                if (tuckAnim?.isRunning == true) { tuckAnim?.cancel(); applyTuckGeometry(if (tucked) 1f else 0f) }
+                tuckedAtDown = tucked
                 downX = ev.rawX; downY = ev.rawY
                 startX = p.x; startY = p.y
                 dragging = false
@@ -247,6 +320,12 @@ class OverlayController(
                 if (!dragging && hypot(dx, dy) > slop) {
                     dragging = true
                     pressed = false
+                    if (tuckedAtDown) {
+                        // Pull the full button out of the edge, then drag it like normal.
+                        tucked = false
+                        applyTuckGeometry(0f)
+                        startX = p.x - dx.toInt(); startY = p.y - dy.toInt()
+                    }
                     showTarget()
                 }
                 if (dragging) {
@@ -274,7 +353,16 @@ class OverlayController(
                     }
                 } else if (ev.actionMasked == MotionEvent.ACTION_UP) {
                     v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    onTap()
+                    if (tuckedAtDown) {
+                        // Slide out of the edge and start recording right away.
+                        animateTuck(false)
+                        onTap()
+                        scheduleTuck(3500) // goes back in by itself if nothing started
+                    } else {
+                        onTap()
+                    }
+                } else if (edgeMode()) {
+                    scheduleTuck()
                 }
             }
         }
@@ -309,6 +397,7 @@ class OverlayController(
         val (sw, sh) = screen()
         val toX = if (p.x + p.width / 2 < sw / 2) 0 else sw - p.width
         p.y = p.y.coerceIn(dp(24), max(dp(24), sh - p.height - dp(24)))
+        restY = p.y
         snapAnim = ValueAnimator.ofInt(p.x, toX).apply {
             duration = 240
             interpolator = DecelerateInterpolator()
@@ -316,12 +405,101 @@ class OverlayController(
             start()
         }
         service.lifecycleScope.launch { app.settings.setBubblePos(toX, p.y) }
+        scheduleTuck()
+    }
+
+    // ------------------------------------------------------------------ edge tuck
+
+    /** In "edge" style, hides the mic into the screen side after a short quiet moment. */
+    private fun scheduleTuck(delayMs: Long = 2200) {
+        tuckJob?.cancel()
+        if (!edgeMode() || tucked || bubble == null) return
+        tuckJob = service.lifecycleScope.launch {
+            delay(delayMs)
+            if (edgeMode() && !tucked && !dragging && !pressed && panel == null && !bubbleBusy(engineState) && bubble != null) {
+                animateTuck(true)
+            }
+        }
+    }
+
+    private fun animateTuck(to: Boolean) {
+        val p = bubbleParams ?: return
+        if (bubble == null) return
+        tuckAnim?.cancel()
+        snapAnim?.cancel()
+        if (to && !tucked && tuckF == 0f) {
+            val (sw, _) = screen()
+            tuckRight = p.x + p.width / 2 > sw / 2
+            restY = p.y
+        }
+        tucked = to
+        tuckAnim = ValueAnimator.ofFloat(tuckF, if (to) 1f else 0f).apply {
+            duration = if (to) 280 else 200
+            interpolator = DecelerateInterpolator()
+            addUpdateListener { applyTuckGeometry(it.animatedValue as Float) }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (!to) service.lifecycleScope.launch { app.settings.setBubblePos(p.x, p.y) }
+                }
+            })
+            start()
+        }
+    }
+
+    /** f: 0 = full round button on the edge, 1 = small tab half inside the edge. */
+    private fun applyTuckGeometry(f: Float) {
+        val p = bubbleParams ?: return
+        val (sw, sh) = screen()
+        val full = windowSizePx()
+        val w = (full + (tabWPx() - full) * f).toInt()
+        val h = (full + (tabHPx() - full) * f).toInt()
+        p.width = w
+        p.height = h
+        p.x = if (tuckRight) sw - w else 0
+        val cy = restY + full / 2
+        p.y = (cy - h / 2).coerceIn(0, max(0, sh - h))
+        tuckF = f
+        update()
     }
 
     private fun update() {
         val b = bubble ?: return
         val p = bubbleParams ?: return
         runCatching { wm.updateViewLayout(b, p) }
+    }
+
+    @Composable
+    private fun BubbleRoot() {
+        val f = tuckF
+        Box(Modifier.fillMaxSize()) {
+            if (f < 0.999f) Box(Modifier.fillMaxSize().alpha(1f - f).scale(1f - 0.6f * f)) { BubbleUi() }
+            if (f > 0.001f) Box(Modifier.fillMaxSize().alpha(f)) { EdgeTab() }
+        }
+    }
+
+    /** The small tab that peeks out of the screen edge. Tap = slide out + start recording. */
+    @Composable
+    private fun EdgeTab() {
+        val brand = LocalBrand.current
+        val pressScale by animateFloatAsState(if (pressed) 0.9f else 1f, tween(110), label = "tab")
+        val r = 16.dp
+        val shape = if (tuckRight) RoundedCornerShape(topStart = r, bottomStart = r)
+        else RoundedCornerShape(topEnd = r, bottomEnd = r)
+        Box(Modifier.fillMaxSize(), contentAlignment = if (tuckRight) Alignment.CenterEnd else Alignment.CenterStart) {
+            Box(
+                Modifier
+                    .width(18.dp).height(56.dp)
+                    .scale(pressScale)
+                    .alpha(settings.bubbleAlpha.coerceAtLeast(0.55f))
+                    .shadow(4.dp, shape)
+                    .clip(shape)
+                    .background(Brush.verticalGradient(brand.gradient))
+                    .border(1.dp, Color.White.copy(alpha = 0.35f), shape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.Mic, "ভয়েস টাইপিং শুরু", Modifier.size(14.dp), tint = Color.White)
+            }
+        }
     }
 
     @Composable
@@ -591,6 +769,8 @@ class OverlayController(
 
     fun destroy() {
         snapAnim?.cancel()
+        tuckAnim?.cancel()
+        tuckJob?.cancel()
         hidePanel()
         target?.let { runCatching { wm.removeView(it) } }
         target = null
