@@ -41,6 +41,8 @@ class VoiceService : LifecycleService(), SavedStateRegistryOwner {
     private var overlay: OverlayController? = null
     private var bubbleWanted = false
     private var lastNotifKey = ""
+    /** True only after Android has accepted us as a foreground service. Before that we must never stop. */
+    private var inForeground = false
 
     override fun onCreate() {
         ssrc.performAttach()
@@ -50,8 +52,10 @@ class VoiceService : LifecycleService(), SavedStateRegistryOwner {
         lifecycleScope.launch {
             app.engine.state.collect { st ->
                 runCatching { overlay?.onEngineState(st) }
-                updateNotification(st)
-                maybeStop()
+                if (inForeground) {
+                    updateNotification(st)
+                    maybeStop()
+                }
             }
         }
         lifecycleScope.launch {
@@ -61,11 +65,13 @@ class VoiceService : LifecycleService(), SavedStateRegistryOwner {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
+        // Android requires startForeground() for EVERY start request, before anything can stop us.
         if (!goForeground()) {
             Toast.makeText(this, "মাইক্রোফোনের অনুমতি দরকার। অ্যাপ খুলে অনুমতি দিন।", Toast.LENGTH_LONG).show()
-            stopSelf()
+            stopEverything()
             return START_NOT_STICKY
         }
+        running = true
         when (intent?.action) {
             ACTION_BUBBLE_ON -> showBubble()
             ACTION_BUBBLE_OFF -> hideBubble()
@@ -89,10 +95,26 @@ class VoiceService : LifecycleService(), SavedStateRegistryOwner {
                 this, NOTIF_ID, buildNotification(app.engine.state.value),
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0,
             )
+            inForeground = true
             true
         } catch (e: Exception) {
+            // Already a foreground service (e.g. tapped from the notification) → keep going.
+            if (inForeground) return true
+            app.saveProblem("সার্ভিস", e)
+            // Still satisfy Android's rule with a plain foreground notice, so the app is never killed.
+            runCatching {
+                ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(app.engine.state.value), 0)
+                inForeground = true
+            }
             false
         }
+    }
+
+    private fun stopEverything() {
+        running = false
+        if (inForeground) runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+        inForeground = false
+        stopSelf()
     }
 
     private fun showBubble() {
@@ -101,6 +123,7 @@ class VoiceService : LifecycleService(), SavedStateRegistryOwner {
             return
         }
         bubbleWanted = true
+        refreshNotification()
         if (overlay == null) {
             overlay = OverlayController(this, app, onRemoved = {
                 lifecycleScope.launch { app.settings.set(SettingsRepo.K.bubbleEnabled, false) }
@@ -129,17 +152,24 @@ class VoiceService : LifecycleService(), SavedStateRegistryOwner {
         bubbleWanted = false
         runCatching { overlay?.destroy() }
         overlay = null
+        refreshNotification()
         maybeStop()
     }
 
     private fun maybeStop() {
-        if (!bubbleWanted && !app.engine.isBusy) {
-            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-            stopSelf()
-        }
+        if (!inForeground) return
+        if (!bubbleWanted && !app.engine.isBusy) stopEverything()
+    }
+
+    private fun refreshNotification() {
+        if (!inForeground) return
+        lastNotifKey = ""
+        updateNotification(app.engine.state.value)
     }
 
     override fun onDestroy() {
+        running = false
+        inForeground = false
         overlay?.destroy()
         overlay = null
         // If the system stops us while recording, save what we have.
@@ -216,13 +246,33 @@ class VoiceService : LifecycleService(), SavedStateRegistryOwner {
         const val ACTION_QUIT = "tf.quit"
         const val EXTRA_SOURCE = "source"
 
+        /** True while the service is up and in the foreground. */
+        @Volatile var running = false
+            private set
+
         /** Call only while the app is on screen (Android allows starting the microphone service then). */
         fun send(context: Context, action: String, source: String = "app") {
+            val app = context.applicationContext as TFApp
+            val hasMic = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            // Nothing to switch off if the service isn't running — don't start it just to stop it.
+            if (!running && (action == ACTION_BUBBLE_OFF || action == ACTION_QUIT)) return
+            if (!running && action == ACTION_STOP_RECORDING) { app.engine.stop(); return }
+            if (!hasMic) {
+                // Never start the microphone service without permission (Android would close the app).
+                if (action == ACTION_TOGGLE) app.engine.toggle(Source.APP)
+                return
+            }
             val i = Intent(context, VoiceService::class.java).setAction(action).putExtra(EXTRA_SOURCE, source)
             try {
                 ContextCompat.startForegroundService(context, i)
             } catch (e: Exception) {
-                Toast.makeText(context, "সার্ভিস চালু করা যায়নি: ${e.message}", Toast.LENGTH_LONG).show()
+                app.saveProblem("সার্ভিস চালু", e)
+                // Fallback: in-app voice typing still works directly while the app is open.
+                when (action) {
+                    ACTION_TOGGLE -> app.engine.toggle(Source.APP)
+                    ACTION_STOP_RECORDING -> app.engine.stop()
+                    else -> Toast.makeText(context, "ভাসমান মাইক চালু করা যায়নি। অ্যাপের ভেতরের মাইক ব্যবহার করুন।", Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
