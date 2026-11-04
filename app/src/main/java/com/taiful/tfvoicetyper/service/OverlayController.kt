@@ -532,14 +532,42 @@ class OverlayController(
         }
     }
 
-    /** Recording: the SAME round button turns red; a small live wave and the time sit INSIDE the circle. */
+    /**
+     * Recording: the SAME round button turns red and clearly "comes alive":
+     *  • soft red rings keep rippling out around it (you can see it is listening),
+     *  • a glow behind it grows with your voice,
+     *  • 5 bold white bars inside dance with your voice (they gently move even in silence),
+     *  • a small blinking dot + the time.
+     */
     @Composable
     private fun RecordingCircle(st: EngineState.Recording) {
         val sizeDp = settings.bubbleSizeDp.dp
         val pressScale by animateFloatAsState(if (pressed) 0.88f else 1f, tween(120), label = "rp")
-        val bars = 7
-        val shown = levels.takeLast(bars)
+        // How far rings/glow may grow and still stay inside our window (window = button + 18dp).
+        val maxScale = (settings.bubbleSizeDp + 17f) / settings.bubbleSizeDp
+        val inf = rememberInfiniteTransition(label = "rec")
+        val ripple by inf.animateFloat(0f, 1f, infiniteRepeatable(tween(1500, easing = androidx.compose.animation.core.LinearEasing)), label = "ripple")
+        val wiggle by inf.animateFloat(0f, (2 * Math.PI).toFloat(), infiniteRepeatable(tween(900, easing = androidx.compose.animation.core.LinearEasing)), label = "wiggle")
+        val blink by inf.animateFloat(1f, 0.25f, infiniteRepeatable(tween(600), RepeatMode.Reverse), label = "blink")
+        // Voice loudness, boosted so normal talking shows big movement.
+        val raw = levels.lastOrNull() ?: 0f
+        val voice by animateFloatAsState(kotlin.math.sqrt(raw.coerceIn(0f, 1f)), tween(120), label = "voice")
+        val red = Color(0xFFEF4444)
+
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            // Two rippling rings
+            for (k in 0..1) {
+                val p = (ripple + k * 0.5f) % 1f
+                Box(
+                    Modifier.size(sizeDp).scale(1f + (maxScale - 1f) * p).alpha((1f - p) * 0.75f)
+                        .border(2.dp, red, CircleShape)
+                )
+            }
+            // Voice glow
+            Box(
+                Modifier.size(sizeDp).scale(1f + (maxScale - 1f) * 0.85f * voice).alpha(0.22f + 0.33f * voice)
+                    .clip(CircleShape).background(red)
+            )
             Box(
                 Modifier
                     .size(sizeDp)
@@ -547,25 +575,36 @@ class OverlayController(
                     .shadow(6.dp, CircleShape)
                     .clip(CircleShape) // nothing can ever draw outside the circle
                     .background(Brush.linearGradient(listOf(Color(0xFFF05252), Color(0xFFB91C1C))))
-                    .border(1.5.dp, Color.White.copy(alpha = 0.35f), CircleShape),
+                    .border(1.5.dp, Color.White.copy(alpha = 0.5f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    val waveH = sizeDp * 0.34f
+                    val waveH = sizeDp * 0.40f
+                    val shown = levels.takeLast(5)
                     Row(
-                        Modifier.width(sizeDp * 0.56f).height(waveH),
+                        Modifier.width(sizeDp * 0.50f).height(waveH),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(sizeDp * 0.025f),
+                        horizontalArrangement = Arrangement.spacedBy(sizeDp * 0.04f),
                     ) {
-                        shown.forEach { l -> WaveBar(l, waveH) }
+                        // Middle bars tallest, like a real voice wave
+                        val shape = floatArrayOf(0.6f, 0.85f, 1f, 0.85f, 0.6f)
+                        shown.forEachIndexed { i, l ->
+                            val idle = 0.22f + 0.12f * ((kotlin.math.sin(wiggle + i * 1.3f) + 1f) / 2f)
+                            val live = kotlin.math.sqrt(l.coerceIn(0f, 1f)) * shape[i % 5]
+                            WaveBar(max(idle, live), waveH)
+                        }
                     }
-                    Spacer(Modifier.height(sizeDp * 0.03f))
-                    Text(
-                        Fmt.duration(st.elapsedMs), color = Color.White,
-                        fontSize = (settings.bubbleSizeDp * 0.17f).coerceIn(8f, 13f).sp,
-                        fontWeight = FontWeight.SemiBold, maxLines = 1,
-                        style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum", lineHeight = (settings.bubbleSizeDp * 0.19f).coerceIn(9f, 15f).sp),
-                    )
+                    Spacer(Modifier.height(sizeDp * 0.02f))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size((settings.bubbleSizeDp * 0.09f).coerceIn(4f, 7f).dp).alpha(blink).clip(CircleShape).background(Color.White))
+                        Spacer(Modifier.width(2.dp))
+                        Text(
+                            Fmt.duration(st.elapsedMs), color = Color.White,
+                            fontSize = (settings.bubbleSizeDp * 0.17f).coerceIn(8f, 13f).sp,
+                            fontWeight = FontWeight.Bold, maxLines = 1,
+                            style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum", lineHeight = (settings.bubbleSizeDp * 0.19f).coerceIn(9f, 15f).sp),
+                        )
+                    }
                 }
             }
         }
@@ -573,11 +612,11 @@ class OverlayController(
 
     @Composable
     private fun androidx.compose.foundation.layout.RowScope.WaveBar(level: Float, maxH: androidx.compose.ui.unit.Dp) {
-        val target = (0.12f + level * 0.88f).coerceIn(0.12f, 1f)
-        val f by animateFloatAsState(target, tween(110), label = "w")
+        val target = level.coerceIn(0.15f, 1f)
+        val f by animateFloatAsState(target, tween(90), label = "w")
         Box(
             Modifier.weight(1f).height(maxH * f).clip(RoundedCornerShape(50))
-                .background(Color.White.copy(alpha = 0.45f + f * 0.55f))
+                .background(Color.White)
         )
     }
 

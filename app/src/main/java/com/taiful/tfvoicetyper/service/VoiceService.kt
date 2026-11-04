@@ -185,8 +185,8 @@ class VoiceService : LifecycleService(), SavedStateRegistryOwner {
         runCatching { nm.deleteNotificationChannel("tf_voice") }
         nm.createNotificationChannel(
             // MIN = silent, folded into the bottom "silent" section, no pop-up, no sound.
-            NotificationChannel(CHANNEL, "মাইক চালু", NotificationManager.IMPORTANCE_MIN).apply {
-                description = "ভাসমান মাইক চালু থাকলে ছোট করে দেখায়"
+            NotificationChannel(CHANNEL, "ভয়েস টাইপার", NotificationManager.IMPORTANCE_MIN).apply {
+                description = "ভাসমান বাটন চালু থাকলে ছোট করে দেখায়"
                 setShowBadge(false)
                 setSound(null, null)
                 enableVibration(false)
@@ -204,7 +204,7 @@ class VoiceService : LifecycleService(), SavedStateRegistryOwner {
         runCatching { getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification(st)) }
     }
 
-    /** Only one tiny line: "মাইক চালু আছে". No buttons, no extra text — so nobody clears it by mistake. */
+    /** Only one tiny, calm line: "লেখার জন্য প্রস্তুত ✓". No buttons, no extra text — so nobody clears it by mistake. */
     @Suppress("UNUSED_PARAMETER")
     private fun buildNotification(st: EngineState): Notification {
         val open = PendingIntent.getActivity(
@@ -212,8 +212,8 @@ class VoiceService : LifecycleService(), SavedStateRegistryOwner {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_stat_mic)
-            .setContentTitle("মাইক চালু আছে")
+            .setSmallIcon(R.drawable.ic_stat_typer)
+            .setContentTitle("লেখার জন্য প্রস্তুত ✓")
             .setContentIntent(open)
             .setOngoing(true)
             .setSilent(true)
