@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-class GeminiException(val userMessage: String, val retryable: Boolean = false) : Exception(userMessage)
+class GeminiException(val userMessage: String, val retryable: Boolean = false, val code: Int = 0) : Exception(userMessage)
 
 data class Transcript(val bangla: String, val english: String)
 
@@ -67,7 +67,7 @@ class GeminiClient(private val baseUrl: String = "https://generativelanguage.goo
         val body = JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("role", "user")
                 .put("parts", JSONArray().put(JSONObject().put("text", "Reply with just: OK")))))
-        val text = extractText(JSONObject(generate(key, model, body)))
+        val text = extractText(JSONObject(generate(key, model, body, fallback = false)))
         return if (text.isNotBlank()) "সংযোগ ঠিক আছে ✓ ($model)" else "সংযোগ হয়েছে, তবে উত্তর খালি এসেছে ($model)"
     }
 
@@ -148,24 +148,40 @@ class GeminiClient(private val baseUrl: String = "https://generativelanguage.goo
         return sb.toString()
     }
 
-    /** generateContent with automatic retry for temporary problems (busy server, rate limit). */
-    private suspend fun generate(key: String, model: String, body: JSONObject): String {
+    /**
+     * generateContent with automatic retry. If the chosen model stays busy (5xx) or its free limit is
+     * used up (429), it quietly tries other Flash models, so the user still gets the text.
+     */
+    private suspend fun generate(key: String, model: String, body: JSONObject, fallback: Boolean = true): String {
         val payload = body.toString()
-        var attempt = 0
-        while (true) {
-            val req = Request.Builder()
-                .url("$baseUrl/models/${model.trim()}:generateContent")
-                .header("x-goog-api-key", key)
-                .post(payload.toRequestBody(json))
-                .build()
-            try {
-                return execute(req)
-            } catch (e: GeminiException) {
-                attempt++
-                if (!e.retryable || attempt > 2) throw e
-                delay(if (attempt == 1) 4000L else 10000L)
+        val models = (listOf(model.trim()) + if (fallback) FALLBACK_MODELS else emptyList()).filter { it.isNotBlank() }.distinct()
+        var firstError: GeminiException? = null
+        for ((i, m) in models.withIndex()) {
+            var attempt = 0
+            while (true) {
+                val req = Request.Builder()
+                    .url("$baseUrl/models/$m:generateContent")
+                    .header("x-goog-api-key", key)
+                    .post(payload.toRequestBody(json))
+                    .build()
+                try {
+                    return execute(req)
+                } catch (e: GeminiException) {
+                    if (i == 0 && firstError == null) firstError = e
+                    val busy = e.code >= 500 || e.code == 429
+                    val missing = e.code == 404 && fallback        // model not offered to this key → try the next one
+                    if (missing) break
+                    if (!e.retryable) throw (if (i == 0) e else firstError ?: e)
+                    attempt++
+                    val maxTries = if (e.code == 429) 1 else 2      // 429 = per-model quota → move on quickly
+                    if (attempt >= maxTries) {
+                        if (busy && fallback) break else throw (firstError ?: e)
+                    }
+                    delay(if (attempt == 1) 3000L else 7000L)
+                }
             }
         }
+        throw firstError ?: GeminiException("Gemini সার্ভার এখন ব্যস্ত। একটু পরে আবার চেষ্টা করুন।", retryable = true, code = 503)
     }
 
     private suspend fun execute(req: Request): String {
@@ -186,15 +202,21 @@ class GeminiClient(private val baseUrl: String = "https://generativelanguage.goo
                 r.code == 401 || r.code == 403 ->
                     GeminiException("এই API key দিয়ে অনুমতি নেই। key ঠিক আছে কিনা Settings-এ দেখুন।")
                 r.code == 404 ->
-                    GeminiException("মডেল \"${req.url.encodedPath.substringAfterLast('/').substringBefore(':')}\" পাওয়া যায়নি। Settings-এ অন্য মডেল বেছে নিন।")
+                    GeminiException(code = 404, userMessage = "মডেল \"${req.url.encodedPath.substringAfterLast('/').substringBefore(':')}\" পাওয়া যায়নি। Settings-এ অন্য মডেল বেছে নিন।")
                 r.code == 413 -> GeminiException("অডিওটি খুব বড়। ছোট করে রেকর্ড করুন।")
                 r.code == 429 ->
-                    GeminiException("Gemini-এর ব্যবহার-সীমা (limit) শেষ বা খুব দ্রুত অনুরোধ। একটু পরে আবার চেষ্টা করুন।", retryable = true)
+                    GeminiException("Gemini-এর ফ্রি ব্যবহার-সীমা (limit) শেষ বা খুব দ্রুত অনুরোধ। একটু পরে আবার চেষ্টা করুন।", retryable = true, code = 429)
                 r.code >= 500 ->
-                    GeminiException("Gemini সার্ভার এখন ব্যস্ত (${r.code})। একটু পরে আবার চেষ্টা করুন।", retryable = true)
+                    GeminiException("Gemini সার্ভার এখন ব্যস্ত (${r.code})। সব মডেল চেষ্টা করা হয়েছে — কয়েক মিনিট পরে আবার চেষ্টা করুন।" +
+                        if (apiMsg.isNotBlank()) "\n(${apiMsg.take(120)})" else "", retryable = true, code = r.code)
                 else -> GeminiException("Gemini ত্রুটি (${r.code})${if (apiMsg.isNotBlank()) ": " + apiMsg.take(160) else ""}")
             }
         }
+    }
+
+    companion object {
+        /** Tried in this order when the chosen model is busy. Missing ones are skipped. */
+        val FALLBACK_MODELS = listOf("gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-2.5-flash-lite")
     }
 
     private suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->
