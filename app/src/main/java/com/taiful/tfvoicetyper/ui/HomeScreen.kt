@@ -55,6 +55,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -82,6 +83,7 @@ fun HomeScreen(
     setBubble: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenRecord: (Long) -> Unit,
+    onOpenHistory: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val st by vm.engine.collectAsState()
@@ -165,22 +167,24 @@ fun HomeScreen(
             }
         }
 
-        val done = (st as? EngineState.Done)?.record
-        val show = done ?: latest
-        if (show != null && st !is EngineState.Recording && st !is EngineState.Processing) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        val recent by vm.recent.collectAsState()
+        if (recent.isNotEmpty() && st !is EngineState.Recording) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+                Text("সাম্প্রতিক লেখা", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 Text(
-                    if (done != null) "নতুন লেখা" else "সর্বশেষ",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    SimpleDateFormat("d MMM, h:mm a", Locale("bn", "BD")).format(Date(show.createdAt)) + " • " + Fmt.duration(show.durationMs),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    "সব দেখুন ›", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onOpenHistory).padding(horizontal = 8.dp, vertical = 4.dp),
                 )
             }
-            ResultCards(show) { bn, en -> vm.saveText(show.id, bn, en) }
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            ) {
+                Column(Modifier.fillMaxWidth().padding(4.dp)) {
+                    recent.forEach { r -> HistoryItem(r, selecting = false, selected = false, onClick = { onOpenRecord(r.id) }) }
+                }
+            }
         }
         Spacer(Modifier.height(4.dp))
     }

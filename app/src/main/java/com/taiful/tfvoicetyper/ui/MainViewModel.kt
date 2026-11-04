@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -26,6 +27,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val savedModels: StateFlow<List<String>> = tf.settings.savedModels.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val engine = tf.engine.state
     val latest: StateFlow<Record?> = dao.latestDone().stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val recent: StateFlow<List<Record>> = dao.all().map { it.take(6) }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val count: StateFlow<Int> = dao.count().stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
     val query = MutableStateFlow("")

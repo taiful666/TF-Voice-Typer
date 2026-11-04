@@ -53,6 +53,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -148,7 +150,7 @@ fun HistoryScreen(vm: MainViewModel, onOpen: (Long) -> Unit) {
         val grouped = remember(list) { list.groupBy { dayLabel(it.createdAt) } }
         LazyColumn(
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             grouped.forEach { (day, items) ->
                 item(key = "h_$day") {
@@ -166,7 +168,6 @@ fun HistoryScreen(vm: MainViewModel, onOpen: (Long) -> Unit) {
                             if (selecting) { if (isSel) selected.remove(r.id) else selected.add(r.id) } else onOpen(r.id)
                         },
                         onLong = { if (!isSel) selected.add(r.id) },
-                        onCopy = { Clip.copy(ctx, r.bangla, "বাংলা লেখা") },
                     )
                 }
             }
@@ -193,54 +194,46 @@ fun HistoryScreen(vm: MainViewModel, onOpen: (Long) -> Unit) {
     }
 }
 
+/** First words of a note, on one line — like a chat title in Claude / ChatGPT. */
+fun previewOf(r: Record): String {
+    val t = r.bangla.ifBlank { r.english }.replace(Regex("\\s+"), " ").trim()
+    return t.ifBlank { r.error ?: "—" }
+}
+
+/** One compact line per note. Tap → opens the full note (copy is there). Long-press → select. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HistoryItem(
-    r: Record, selecting: Boolean, selected: Boolean, modifier: Modifier,
-    onClick: () -> Unit, onLong: () -> Unit, onCopy: () -> Unit,
+fun HistoryItem(
+    r: Record, selecting: Boolean, selected: Boolean, modifier: Modifier = Modifier,
+    onClick: () -> Unit, onLong: () -> Unit = {},
 ) {
     val c = MaterialTheme.colorScheme
-    val border by animateColorAsState(if (selected) c.primary else c.outlineVariant, label = "b")
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = if (selected) c.primary.copy(alpha = 0.07f) else c.surface,
-        border = BorderStroke(if (selected) 1.5.dp else 1.dp, border),
-        modifier = modifier.fillMaxWidth(),
+    val bg by animateColorAsState(if (selected) c.primary.copy(alpha = 0.12f) else Color.Transparent, label = "b")
+    Row(
+        modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(bg)
+            .combinedClickable(onClick = onClick, onLongClick = onLong)
+            .padding(start = 10.dp, end = 10.dp, top = 9.dp, bottom = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            Modifier.clip(RoundedCornerShape(14.dp)).combinedClickable(onClick = onClick, onLongClick = onLong)
-                .padding(start = 10.dp, end = 4.dp, top = 7.dp, bottom = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (selecting) {
-                Icon(
-                    if (selected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked, null,
-                    Modifier.size(20.dp), tint = if (selected) c.primary else c.outline,
-                )
-                Spacer(Modifier.width(8.dp))
-            }
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(timeLabel(r.createdAt), style = MaterialTheme.typography.labelMedium, color = c.onSurfaceVariant)
-                    Text("  •  " + Fmt.duration(r.durationMs), style = MaterialTheme.typography.labelMedium, color = c.onSurfaceVariant)
-                    Spacer(Modifier.width(6.dp))
-                    when {
-                        r.isFailed -> Chip("ব্যর্থ — আবার চেষ্টা করুন", c.error)
-                        r.status == Record.STATUS_PROCESSING -> Chip("প্রসেস হচ্ছে", c.secondary)
-                    }
-                }
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    r.bangla.ifBlank { r.error ?: "—" },
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2, overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (!selecting && r.isDone) {
-                IconButton(onClick = onCopy, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Outlined.ContentCopy, "কপি", Modifier.size(17.dp), tint = c.primary)
-                }
-            }
+        if (selecting) {
+            Icon(
+                if (selected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked, null,
+                Modifier.size(19.dp), tint = if (selected) c.primary else c.outline,
+            )
+            Spacer(Modifier.width(8.dp))
         }
+        when {
+            r.isFailed -> { Box(Modifier.size(7.dp).clip(CircleShape).background(c.error)); Spacer(Modifier.width(7.dp)) }
+            r.status == Record.STATUS_PROCESSING -> { Box(Modifier.size(7.dp).clip(CircleShape).background(c.secondary)); Spacer(Modifier.width(7.dp)) }
+        }
+        Text(
+            previewOf(r),
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (r.isFailed) c.error else c.onSurface.copy(alpha = 0.78f),
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(timeLabel(r.createdAt), style = MaterialTheme.typography.labelSmall, color = c.onSurfaceVariant.copy(alpha = 0.7f))
     }
 }

@@ -121,7 +121,7 @@ fun AppRoot(vm: MainViewModel, resumeTick: Int, openRecord: Long?, onOpenRecord:
                             label = "tab",
                         ) { t ->
                             when (t) {
-                                0 -> HomeScreen(vm, s, tick, perms, setBubble, onOpenSettings = { tab = 2 }, onOpenRecord = { onOpenRecord(it) })
+                                0 -> HomeScreen(vm, s, tick, perms, setBubble, onOpenSettings = { tab = 2 }, onOpenRecord = { onOpenRecord(it) }, onOpenHistory = { tab = 1 })
                                 1 -> HistoryScreen(vm, onOpen = { onOpenRecord(it) })
                                 else -> SettingsScreen(vm, s, setBubble)
                             }

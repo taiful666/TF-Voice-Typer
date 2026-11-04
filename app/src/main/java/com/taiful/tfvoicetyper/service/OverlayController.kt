@@ -203,7 +203,7 @@ class OverlayController(
             if (!wasRecording) for (i in levels.indices) levels[i] = 0f
             levels.removeAt(0); levels.add(st.level.coerceIn(0f, 1f))
         }
-        applyPillMode(st is EngineState.Recording)
+        applyPillMode(false) // recording stays inside the round button
         val wantPanel = (st is EngineState.Done && st.source == Source.BUBBLE) ||
             (st is EngineState.Error && st.source == Source.BUBBLE)
         if (wantPanel && bubble != null) showPanel() else hidePanel()
@@ -332,7 +332,7 @@ class OverlayController(
     @Composable
     private fun BubbleUi() {
         val st = engineState
-        if (st is EngineState.Recording && wide) { RecordingPill(st); return }
+        if (st is EngineState.Recording) { RecordingCircle(st); return }
         val brand = LocalBrand.current
         val sizeDp = settings.bubbleSizeDp.dp
         val busy = st is EngineState.Processing
@@ -359,50 +359,41 @@ class OverlayController(
         }
     }
 
-    /** Recording: dark pill with a red stop button, a live voice wave and the running time. */
+    /** Recording: the SAME round button turns red; a small live wave and the time sit INSIDE the circle. */
     @Composable
-    private fun RecordingPill(st: EngineState.Recording) {
-        val h = settings.bubbleSizeDp.dp
-        val pressScale by animateFloatAsState(if (pressed) 0.95f else 1f, tween(120), label = "pp")
-        val inf = rememberInfiniteTransition(label = "dot")
-        val blink by inf.animateFloat(1f, 0.25f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "b")
+    private fun RecordingCircle(st: EngineState.Recording) {
+        val sizeDp = settings.bubbleSizeDp.dp
+        val pressScale by animateFloatAsState(if (pressed) 0.88f else 1f, tween(120), label = "rp")
+        val bars = 7
+        val shown = levels.takeLast(bars)
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Row(
+            Box(
                 Modifier
-                    .padding(horizontal = 9.dp)
-                    .fillMaxWidth()
-                    .height(h)
+                    .size(sizeDp)
                     .scale(pressScale)
-                    .shadow(8.dp, RoundedCornerShape(50))
-                    .clip(RoundedCornerShape(50))
-                    .background(Color(0xF2121619))
-                    .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(50))
-                    .padding(start = 5.dp, end = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .shadow(6.dp, CircleShape)
+                    .clip(CircleShape) // nothing can ever draw outside the circle
+                    .background(Brush.linearGradient(listOf(Color(0xFFF05252), Color(0xFFB91C1C))))
+                    .border(1.5.dp, Color.White.copy(alpha = 0.35f), CircleShape),
+                contentAlignment = Alignment.Center,
             ) {
-                Box(
-                    Modifier.size(h - 10.dp).clip(CircleShape)
-                        .background(Brush.linearGradient(listOf(Color(0xFFF05252), Color(0xFFC81E1E)))),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(Modifier.size((h.value * 0.26f).dp).clip(RoundedCornerShape(3.dp)).background(Color.White))
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    val waveH = sizeDp * 0.34f
+                    Row(
+                        Modifier.width(sizeDp * 0.56f).height(waveH),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(sizeDp * 0.025f),
+                    ) {
+                        shown.forEach { l -> WaveBar(l, waveH) }
+                    }
+                    Spacer(Modifier.height(sizeDp * 0.03f))
+                    Text(
+                        Fmt.duration(st.elapsedMs), color = Color.White,
+                        fontSize = (settings.bubbleSizeDp * 0.17f).coerceIn(8f, 13f).sp,
+                        fontWeight = FontWeight.SemiBold, maxLines = 1,
+                        style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum", lineHeight = (settings.bubbleSizeDp * 0.19f).coerceIn(9f, 15f).sp),
+                    )
                 }
-                Spacer(Modifier.width(8.dp))
-                Row(
-                    Modifier.weight(1f).height(h * 0.62f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    levels.forEach { l -> WaveBar(l, h * 0.62f) }
-                }
-                Spacer(Modifier.width(7.dp))
-                Box(Modifier.size(6.dp).alpha(blink).clip(CircleShape).background(Color(0xFFF05252)))
-                Spacer(Modifier.width(5.dp))
-                Text(
-                    Fmt.duration(st.elapsedMs), color = Color.White,
-                    fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
-                    style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
-                )
             }
         }
     }
