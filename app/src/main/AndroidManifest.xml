@@ -12,6 +12,13 @@
     <!-- In-app update: lets the app open Android's own install screen for its own new version -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Lets the app find the phone's own Google voice typing (no-key mode) -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
     <application
         android:name=".TFApp"
         android:allowBackup="false"

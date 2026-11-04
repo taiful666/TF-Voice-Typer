@@ -23,6 +23,8 @@ class TFApp : Application() {
         private set
     lateinit var gemini: GeminiClient
         private set
+    lateinit var groq: com.taiful.tfvoicetyper.ai.GroqClient
+        private set
     lateinit var engine: VoiceEngine
         private set
     lateinit var updater: Updater
@@ -38,6 +40,7 @@ class TFApp : Application() {
         settings = SettingsRepo(this)
         db = AppDatabase.get(this)
         gemini = GeminiClient()
+        groq = com.taiful.tfvoicetyper.ai.GroqClient()
         engine = VoiceEngine(this)
         updater = Updater(this, appScope)
         val prefs = getSharedPreferences("tf_crash", MODE_PRIVATE)

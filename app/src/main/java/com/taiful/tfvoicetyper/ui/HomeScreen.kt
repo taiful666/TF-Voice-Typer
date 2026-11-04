@@ -94,10 +94,6 @@ fun HomeScreen(
             st is EngineState.Processing -> Toast.makeText(ctx, "লেখা তৈরি হচ্ছে, একটু অপেক্ষা করুন…", Toast.LENGTH_SHORT).show()
             st is EngineState.Recording -> VoiceService.send(ctx, VoiceService.ACTION_STOP_RECORDING)
             !Perm.mic(ctx) -> perms.requestMic()
-            !s.hasApiKey -> {
-                Toast.makeText(ctx, "আগে Gemini API key দিন", Toast.LENGTH_SHORT).show()
-                onOpenSettings()
-            }
             else -> {
                 vm.tf.engine.dismiss()
                 VoiceService.send(ctx, VoiceService.ACTION_TOGGLE, "app")
@@ -120,9 +116,14 @@ fun HomeScreen(
                 }
             }
         }
-        if (!s.hasApiKey) {
-            SectionCard("শুরু করতে Gemini API key দিন", Icons.Outlined.Key) {
-                PillButton("API key দিন", Icons.Outlined.Key, filled = true, onClick = onOpenSettings)
+        if (!s.hasApiKey && !s.hasGroqKey && s.engine != com.taiful.tfvoicetyper.data.AppSettings.ENGINE_PHONE) {
+            SectionCard("এখন key ছাড়াই চলছে (ফোনের ভয়েস টাইপিং)", Icons.Outlined.Key) {
+                Text(
+                    "আরও শুদ্ধ লেখা, দাঁড়ি-কমা আর ভালো অনুবাদের জন্য একটি ফ্রি Gemini বা Groq key দিন (২ মিনিটের কাজ)।",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                PillButton("ফ্রি key দিন", Icons.Outlined.Key, filled = true, onClick = onOpenSettings)
             }
         }
         PermissionCard(tick, perms)

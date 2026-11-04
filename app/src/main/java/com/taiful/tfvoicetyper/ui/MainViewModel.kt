@@ -61,6 +61,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun saveKey(key: String) = tf.settings.setApiKey(key)
 
+    suspend fun storedGroqKey(): String = tf.settings.groqKey().orEmpty()
+
+    suspend fun saveGroqKey(key: String) = tf.settings.setGroqKey(key)
+
+    suspend fun testGroq(key: String): Pair<Boolean, String> = try {
+        true to tf.groq.test(key)
+    } catch (e: GeminiException) {
+        false to e.userMessage
+    } catch (e: Exception) {
+        false to (e.message ?: "অজানা সমস্যা")
+    }
+
     suspend fun test(key: String, model: String): Pair<Boolean, String> = try {
         true to tf.gemini.test(key, model)
     } catch (e: GeminiException) {

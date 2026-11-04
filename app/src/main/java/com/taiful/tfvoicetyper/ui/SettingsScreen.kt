@@ -92,8 +92,10 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, setBubble: (Boolean) -> Un
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        EngineCard(vm, s)
+
         // ---------------- Gemini API ----------------
-        SectionCard("Gemini API", Icons.Outlined.Key) {
+        SectionCard("Gemini API — প্রধান (সবচেয়ে ভালো মান)", Icons.Outlined.Key) {
             var key by remember { mutableStateOf("") }
             var show by remember { mutableStateOf(false) }
             var msg by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
@@ -209,6 +211,8 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, setBubble: (Boolean) -> Un
                 Text(t, style = MaterialTheme.typography.bodySmall, color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
             }
         }
+
+        GroqCard(vm, s)
 
         // ---------------- Theme ----------------
         SectionCard("থিম ও রং", Icons.Outlined.Palette) {

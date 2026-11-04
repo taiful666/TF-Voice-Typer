@@ -285,11 +285,6 @@ class OverlayController(
             is EngineState.Recording -> app.engine.stop()
             is EngineState.Processing -> Toast.makeText(service, "লেখা তৈরি হচ্ছে, একটু অপেক্ষা করুন…", Toast.LENGTH_SHORT).show()
             else -> {
-                if (!settings.hasApiKey) {
-                    Toast.makeText(service, "আগে অ্যাপের Settings-এ Gemini API key দিন", Toast.LENGTH_LONG).show()
-                    openApp(null)
-                    return
-                }
                 if (st is EngineState.Done || st is EngineState.Error) app.engine.dismiss()
                 app.engine.start(Source.BUBBLE)
             }

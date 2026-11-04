@@ -80,6 +80,7 @@ class GeminiClient(private val baseUrl: String = "https://generativelanguage.goo
         parts: Int,
         previousTail: String,
         translate: Boolean,
+        patient: Boolean = true,
     ): Transcript {
         val b64 = withContext(Dispatchers.Default) { Base64.encodeToString(audio, Base64.NO_WRAP) }
         val schema = JSONObject()
@@ -98,7 +99,7 @@ class GeminiClient(private val baseUrl: String = "https://generativelanguage.goo
                 .put("responseMimeType", "application/json")
                 .put("responseSchema", schema))
 
-        val resp = JSONObject(generate(key, model, body))
+        val resp = JSONObject(generate(key, model, body, fallback = true, patient = patient))
         resp.optJSONObject("promptFeedback")?.optString("blockReason")?.takeIf { it.isNotBlank() }?.let {
             throw GeminiException("Gemini এই অডিওটি প্রসেস করতে রাজি হয়নি ($it)।")
         }
@@ -152,7 +153,7 @@ class GeminiClient(private val baseUrl: String = "https://generativelanguage.goo
      * generateContent with automatic retry. If the chosen model stays busy (5xx) or its free limit is
      * used up (429), it quietly tries other Flash models, so the user still gets the text.
      */
-    private suspend fun generate(key: String, model: String, body: JSONObject, fallback: Boolean = true): String {
+    private suspend fun generate(key: String, model: String, body: JSONObject, fallback: Boolean = true, patient: Boolean = true): String {
         val payload = body.toString()
         val models = (listOf(model.trim()) + if (fallback) FALLBACK_MODELS else emptyList()).filter { it.isNotBlank() }.distinct()
         var firstError: GeminiException? = null
@@ -173,11 +174,11 @@ class GeminiClient(private val baseUrl: String = "https://generativelanguage.goo
                     if (missing) break
                     if (!e.retryable) throw (if (i == 0) e else firstError ?: e)
                     attempt++
-                    val maxTries = if (e.code == 429) 1 else 2      // 429 = per-model quota → move on quickly
+                    val maxTries = if (e.code == 429 || !patient) 1 else 2      // 429 = per-model quota → move on quickly
                     if (attempt >= maxTries) {
                         if (busy && fallback) break else throw (firstError ?: e)
                     }
-                    delay(if (attempt == 1) 3000L else 7000L)
+                    if (patient) delay(if (attempt == 1) 3000L else 7000L) else delay(800L)
                 }
             }
         }

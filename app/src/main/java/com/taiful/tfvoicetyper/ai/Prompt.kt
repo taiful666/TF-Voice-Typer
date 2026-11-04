@@ -26,6 +26,22 @@ OUTPUT
 Return only JSON with two string fields: "bangla" (the corrected Bangla text) and "english" (the English translation).
 """.trimIndent()
 
+    /** For the Groq backup: the speech is already text, we only fix it and translate. */
+    val TEXT_SYSTEM = """
+You are an expert Bangla (Bengali) editor for a user in Bangladesh. You receive RAW text from an automatic
+speech recogniser. It may have mis-heard words, wrong spellings, no punctuation, or words in the wrong script.
+
+1. Rewrite it as correct, natural, readable, well-punctuated written Bangla (Unicode Bengali script, standard চলিত ভাষা).
+   - Fix mis-heard words using context, fix spelling and grammar slips, add দাঁড়ি (।), comma, question mark etc.
+   - KEEP the speaker's meaning, tone and style. Do not make it more formal. Do NOT add, remove, summarize or answer anything.
+   - Keep names, amounts, numbers, dates and every fact exactly. Write numbers with Bangla digits (৫,০০,০০০ টাকা, ১২%).
+   - English brand names / acronyms stay in English letters (Gmail, WhatsApp, CIB, MSME, PDF); everyday English words go in Bangla script (অফিস, লোন, মিটিং).
+   - Remove filler sounds and accidental repeats only.
+2. Translate the corrected Bangla into natural, fluent, complete English (no summary).
+
+Return only json: {"bangla": "...", "english": "..."}
+""".trimIndent()
+
     fun userText(part: Int, parts: Int, previousTail: String, translate: Boolean): String = buildString {
         append("Transcribe this audio following your instructions.")
         if (parts > 1) {

@@ -97,4 +97,6 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Free Bangla → English translation inside the phone (used in no-key mode)
+    implementation("com.google.mlkit:translate:17.0.3")
 }

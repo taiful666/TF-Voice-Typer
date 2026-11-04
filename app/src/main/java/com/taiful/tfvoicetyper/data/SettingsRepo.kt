@@ -19,6 +19,9 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 
 data class AppSettings(
     val hasApiKey: Boolean = false,
+    val hasGroqKey: Boolean = false,
+    /** auto = Gemini first then Groq; groq = Groq first then Gemini; phone = phone's own voice typing (no key) */
+    val engine: String = ENGINE_AUTO,
     val model: String = DEFAULT_MODEL,
     val translate: Boolean = true,
     val autoCopy: Boolean = true,
@@ -33,6 +36,9 @@ data class AppSettings(
 ) {
     companion object {
         const val DEFAULT_MODEL = "gemini-flash-latest"
+        const val ENGINE_AUTO = "auto"
+        const val ENGINE_GROQ = "groq"
+        const val ENGINE_PHONE = "phone"
     }
 }
 
@@ -41,6 +47,8 @@ class SettingsRepo(private val context: Context) {
 
     object K {
         val apiKey = stringPreferencesKey("api_key_enc")
+        val groqKey = stringPreferencesKey("groq_key_enc")
+        val engine = stringPreferencesKey("engine")
         val model = stringPreferencesKey("model")
         val translate = booleanPreferencesKey("translate")
         val autoCopy = booleanPreferencesKey("auto_copy")
@@ -58,6 +66,8 @@ class SettingsRepo(private val context: Context) {
     val flow: Flow<AppSettings> = ds.data.map { p ->
         AppSettings(
             hasApiKey = !p[K.apiKey].isNullOrEmpty(),
+            hasGroqKey = !p[K.groqKey].isNullOrEmpty(),
+            engine = p[K.engine] ?: AppSettings.ENGINE_AUTO,
             model = p[K.model] ?: AppSettings.DEFAULT_MODEL,
             translate = p[K.translate] ?: true,
             autoCopy = p[K.autoCopy] ?: true,
@@ -90,6 +100,18 @@ class SettingsRepo(private val context: Context) {
         val clean = key?.trim().orEmpty()
         ds.edit {
             if (clean.isEmpty()) it.remove(K.apiKey) else it[K.apiKey] = SecureStore.encrypt(clean)
+        }
+    }
+
+    suspend fun groqKey(): String? = withContext(Dispatchers.Default) {
+        val enc = ds.data.first()[K.groqKey] ?: return@withContext null
+        SecureStore.decrypt(enc)?.takeIf { it.isNotBlank() }
+    }
+
+    suspend fun setGroqKey(key: String?) = withContext(Dispatchers.Default) {
+        val clean = key?.trim().orEmpty()
+        ds.edit {
+            if (clean.isEmpty()) it.remove(K.groqKey) else it[K.groqKey] = SecureStore.encrypt(clean)
         }
     }
 

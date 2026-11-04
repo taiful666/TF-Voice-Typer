@@ -7,7 +7,12 @@ import android.os.Looper
 import androidx.core.content.ContextCompat
 import com.taiful.tfvoicetyper.TFApp
 import com.taiful.tfvoicetyper.ai.GeminiException
+import com.taiful.tfvoicetyper.ai.PhoneTranslator
+import com.taiful.tfvoicetyper.ai.Transcript
 import com.taiful.tfvoicetyper.audio.AacRecorder
+import com.taiful.tfvoicetyper.audio.AdtsToM4a
+import com.taiful.tfvoicetyper.audio.PhoneRecognizer
+import com.taiful.tfvoicetyper.data.AppSettings
 import com.taiful.tfvoicetyper.audio.partsIn
 import com.taiful.tfvoicetyper.data.db.Record
 import com.taiful.tfvoicetyper.util.Clip
@@ -37,6 +42,9 @@ sealed interface EngineState {
  * The heart of the app: record → send to Gemini → save to history.
  * Shared by the Home screen and the floating microphone.
  */
+private const val GEMINI = "gemini"
+private const val GROQ = "groq"
+
 class VoiceEngine(private val app: TFApp) {
     private val dao get() = app.db.records()
     private val scope get() = app.appScope
@@ -46,6 +54,15 @@ class VoiceEngine(private val app: TFApp) {
     val state: StateFlow<EngineState> = _state
 
     private var recorder: AacRecorder? = null
+    private var phone: PhoneRecognizer? = null
+    @Volatile private var cfg = AppSettings()
+
+    init {
+        scope.launch { app.settings.flow.collect { cfg = it } }
+    }
+
+    /** No key at all (or chosen in Settings) → use the phone's own free voice typing. */
+    val usesPhone: Boolean get() = cfg.engine == AppSettings.ENGINE_PHONE || (!cfg.hasApiKey && !cfg.hasGroqKey)
     private var recordId: CompletableDeferred<Long>? = null
     private var ticker: Job? = null
     private var processJob: Job? = null
@@ -70,6 +87,8 @@ class VoiceEngine(private val app: TFApp) {
             _state.value = EngineState.Error("মাইক্রোফোনের অনুমতি দেওয়া নেই। অ্যাপ খুলে অনুমতি দিন।", null, source)
             return
         }
+        if (Looper.myLooper() != Looper.getMainLooper()) { main.post { start(source) }; return }
+        if (usesPhone) { startPhone(source); return }
         val now = System.currentTimeMillis()
         val dir = File(audioRoot, "rec_$now")
         val rec = AacRecorder(dir) { level = it }
@@ -104,8 +123,74 @@ class VoiceEngine(private val app: TFApp) {
         }
     }
 
+    // ---------------------------------------------------------------- phone's own voice typing
+
+    private fun startPhone(source: Source) {
+        if (!PhoneRecognizer.available(app)) {
+            _state.value = EngineState.Error(
+                "এই ফোনে Google ভয়েস টাইপিং পাওয়া যায়নি। Settings-এ একটি ফ্রি Gemini বা Groq key দিন — তাহলে আরও ভালো লেখা পাবেন।", null, source
+            )
+            return
+        }
+        val p = PhoneRecognizer(app) { level = it }
+        try {
+            p.start()
+        } catch (e: Exception) {
+            _state.value = EngineState.Error("ফোনের ভয়েস টাইপিং চালু করা যায়নি। আবার চেষ্টা করুন।", null, source)
+            return
+        }
+        phone = p
+        val now = System.currentTimeMillis()
+        val idDef = CompletableDeferred<Long>()
+        recordId = idDef
+        scope.launch {
+            idDef.complete(dao.insert(Record(createdAt = now, audioDir = "", status = Record.STATUS_RECORDING)))
+        }
+        level = 0f
+        _state.value = EngineState.Recording(0, 0f, source)
+        ticker = scope.launch {
+            while (isActive) {
+                val r = phone ?: break
+                if (r.failure != null) { main.post { stop() }; break }
+                _state.value = EngineState.Recording(r.durationMs, level, source)
+                delay(100)
+            }
+        }
+    }
+
+    private fun stopPhone(p: PhoneRecognizer) {
+        val src = (_state.value as? EngineState.Recording)?.source ?: Source.APP
+        phone = null
+        ticker?.cancel()
+        val idDef = recordId ?: return
+        _state.value = EngineState.Processing(-1, 0, 0, src)
+        scope.launch {
+            val text = withContext(Dispatchers.Main) { p.stop() }.trim()
+            val dur = p.durationMs
+            val id = idDef.await()
+            val r = dao.get(id) ?: return@launch
+            if (text.isBlank()) {
+                deleteRecords(listOf(id))
+                _state.value = EngineState.Error(
+                    p.failure ?: "কোনো কথা শোনা যায়নি। মাইকে চাপ দিয়ে স্পষ্ট করে বলুন, তারপর আবার চাপুন।", null, src
+                )
+                return@launch
+            }
+            _state.value = EngineState.Processing(id, 1, 1, src)
+            val en = if (cfg.translate) PhoneTranslator.bnToEn(text).orEmpty() else ""
+            val done = r.copy(
+                bangla = text, english = en, durationMs = dur, status = Record.STATUS_DONE, error = null,
+                model = "ফোনের ভয়েস টাইপিং (key ছাড়া)", updatedAt = System.currentTimeMillis(),
+            )
+            dao.update(done)
+            _state.value = EngineState.Done(done, src)
+            if (src == Source.BUBBLE && cfg.autoCopy) main.post { Clip.copy(app, done.bangla, "বাংলা লেখা") }
+        }
+    }
+
     /** Stops recording and starts creating the text. */
     fun stop() {
+        phone?.let { stopPhone(it); return }
         val rec = recorder ?: return
         val src = (_state.value as? EngineState.Recording)?.source ?: Source.APP
         recorder = null
@@ -133,6 +218,15 @@ class VoiceEngine(private val app: TFApp) {
 
     /** Stops and throws the recording away. */
     fun cancel() {
+        phone?.let { p ->
+            phone = null
+            ticker?.cancel()
+            val idDef = recordId
+            _state.value = EngineState.Idle
+            main.post { p.cancel() }
+            scope.launch { idDef?.await()?.let { deleteRecords(listOf(it)) } }
+            return
+        }
         val rec = recorder ?: return
         recorder = null
         ticker?.cancel()
@@ -164,26 +258,65 @@ class VoiceEngine(private val app: TFApp) {
             try {
                 val files = if (rec.audioDir.isNotEmpty()) partsIn(File(rec.audioDir)) else emptyList()
                 if (files.isEmpty()) throw GeminiException("এই রেকর্ডিংয়ের অডিও ফাইল আর নেই, তাই আবার প্রসেস করা যাবে না।")
-                val key = app.settings.apiKey()
-                    ?: throw GeminiException("Gemini API key দেওয়া নেই। Settings-এ গিয়ে API key দিন, তারপর History থেকে আবার চেষ্টা করুন।")
                 val s = app.settings.current()
+                val gKey = app.settings.apiKey()
+                val qKey = app.settings.groqKey()
+                val order = if (s.engine == AppSettings.ENGINE_GROQ) listOf(GROQ, GEMINI) else listOf(GEMINI, GROQ)
+                val providers = order.filter { (it == GEMINI && gKey != null) || (it == GROQ && qKey != null) }.toMutableList()
+                if (providers.isEmpty()) throw GeminiException(
+                    "কোনো API key দেওয়া নেই। Settings-এ একটি ফ্রি Gemini বা Groq key দিন, তারপর \"আবার চেষ্টা\" চাপুন।"
+                )
                 val bn = StringBuilder()
                 val en = StringBuilder()
+                val used = linkedSetOf<String>()
                 files.forEachIndexed { i, f ->
                     _state.value = EngineState.Processing(id, i + 1, files.size, source)
                     val bytes = withContext(Dispatchers.IO) { f.readBytes() }
-                    val t = app.gemini.transcribe(
-                        key = key, model = s.model, audio = bytes, mime = AacRecorder.MIME,
-                        part = i + 1, parts = files.size, previousTail = bn.takeLast(300).toString(),
-                        translate = s.translate,
-                    )
-                    if (t.bangla.isNotBlank()) { if (bn.isNotEmpty()) bn.append(' '); bn.append(t.bangla) }
-                    if (t.english.isNotBlank()) { if (en.isNotEmpty()) en.append(' '); en.append(t.english) }
+                    val tail = bn.takeLast(300).toString()
+                    val errors = mutableListOf<Pair<String, GeminiException>>()
+                    var t: Transcript? = null
+                    for (p in providers.toList()) {
+                        t = try {
+                            if (p == GEMINI) app.gemini.transcribe(
+                                key = gKey!!, model = s.model, audio = bytes, mime = AacRecorder.MIME,
+                                part = i + 1, parts = files.size, previousTail = tail,
+                                translate = s.translate, patient = providers.size == 1,
+                            ) else {
+                                val m4a = withContext(Dispatchers.IO) { AdtsToM4a.convert(bytes, File(app.cacheDir, "groq_part.m4a")) }
+                                app.groq.transcribe(qKey!!, m4a, tail, s.translate)
+                            }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: GeminiException) {
+                            errors += p to e; null
+                        } catch (e: Exception) {
+                            errors += p to GeminiException(e.message ?: e.javaClass.simpleName, retryable = true); null
+                        }
+                        if (t != null) {
+                            used += if (p == GEMINI) "Gemini (${s.model})" else "Groq (Whisper)"
+                            // the one that worked goes first for the next parts
+                            providers.remove(p); providers.add(0, p)
+                            break
+                        }
+                    }
+                    val ok = t ?: throw when {
+                        errors.size == 1 -> errors[0].second
+                        else -> GeminiException(
+                            "Gemini ও Groq দুটোই এই মুহূর্তে কাজ করছে না। অডিও সংরক্ষিত আছে — একটু পরে \"আবার চেষ্টা\" চাপুন।\n" +
+                                errors.joinToString("\n") { (p, e) -> "• ${if (p == GEMINI) "Gemini" else "Groq"}: ${e.userMessage.lineSequence().first()}" },
+                            retryable = true,
+                        )
+                    }
+                    if (ok.bangla.isNotBlank()) { if (bn.isNotEmpty()) bn.append(' '); bn.append(ok.bangla) }
+                    if (ok.english.isNotBlank()) { if (en.isNotEmpty()) en.append(' '); en.append(ok.english) }
+                }
+                if (s.translate && en.isBlank() && bn.isNotBlank()) {
+                    PhoneTranslator.bnToEn(bn.toString())?.let { en.append(it) }
                 }
                 if (bn.isBlank()) throw GeminiException("অডিওতে কোনো কথা শোনা যায়নি। মাইকের কাছে স্পষ্ট করে বলুন।")
                 var done = rec.copy(
                     bangla = bn.toString().trim(), english = en.toString().trim(),
-                    status = Record.STATUS_DONE, error = null, model = s.model, updatedAt = System.currentTimeMillis(),
+                    status = Record.STATUS_DONE, error = null, model = used.joinToString(" + "), updatedAt = System.currentTimeMillis(),
                 )
                 if (s.audioRetentionDays == 0) {
                     withContext(Dispatchers.IO) { File(rec.audioDir).deleteRecursively() }
