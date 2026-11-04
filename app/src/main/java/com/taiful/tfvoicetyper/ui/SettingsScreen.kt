@@ -310,6 +310,9 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, setBubble: (Boolean) -> Un
             )
         }
 
+        // ---------------- Update ----------------
+        UpdateCard(vm.tf)
+
         // ---------------- About ----------------
         SectionCard("অ্যাপ সম্পর্কে", Icons.Outlined.Info) {
             FullLogo(markSize = 42.dp)

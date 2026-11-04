@@ -91,6 +91,28 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk TF-Voice-Typer.apk
           ls -la TF-Voice-Typer.apk
 
+      - name: Write version.json (read by the app's built-in updater)
+        env:
+          VC: ${{ github.run_number }}
+        run: |
+          # What's new (shown in the app's update popup): first lines of release-notes.txt
+          NOTES="$(head -c 300 release-notes.txt 2>/dev/null || echo 'নতুন উন্নতি ও সমস্যার সমাধান')"
+          export NOTES
+          python3 - <<'PY'
+          import hashlib, json, os
+          apk = "TF-Voice-Typer.apk"
+          data = open(apk, "rb").read()
+          vc = int(os.environ["VC"])
+          json.dump({
+              "versionCode": vc,
+              "versionName": f"1.0.{vc}",
+              "notes": os.environ.get("NOTES", ""),
+              "sha256": hashlib.sha256(data).hexdigest(),
+              "size": len(data),
+          }, open("version.json", "w", encoding="utf-8"), ensure_ascii=False)
+          PY
+          cat version.json
+
       - name: Keep the APK as a build file
         uses: actions/upload-artifact@v4
         with:
@@ -102,6 +124,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest TF-Voice-Typer.apk \
+          gh release create latest TF-Voice-Typer.apk version.json --latest \
             --title "TF Voice Typer — Android app (build ${{ github.run_number }})" \
             --notes "ফোনে ইনস্টল করতে নিচের TF-Voice-Typer.apk ফাইলটি ডাউনলোড করে খুলুন। (Build ${{ github.run_number }})"

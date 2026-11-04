@@ -141,6 +141,8 @@ fun AppRoot(vm: MainViewModel, resumeTick: Int, openRecord: Long?, onOpenRecord:
                 }
                 BackHandler(enabled = openRecord != null) { onOpenRecord(null) }
                 BackHandler(enabled = openRecord == null && tab != 0) { tab = 0 }
+                // In-app update: checks on every app open, downloads inside the app (no browser).
+                UpdateHost(vm.tf, resumeTick)
             }
         }
     }
