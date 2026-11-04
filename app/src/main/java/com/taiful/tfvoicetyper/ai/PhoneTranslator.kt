@@ -26,9 +26,9 @@ object PhoneTranslator {
         return try {
             withTimeoutOrNull(120_000) {
                 t.downloadModelIfNeeded(DownloadConditions.Builder().build()).await()
-                text.split('\n').joinToString("\n") { line ->
-                    if (line.isBlank()) line else t.translate(line).await()
-                }
+                val out = ArrayList<String>()
+                for (line in text.split('\n')) out += if (line.isBlank()) line else t.translate(line).await()
+                out.joinToString("\n")
             }
         } catch (e: Exception) {
             null
