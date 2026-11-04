@@ -49,13 +49,13 @@ class VoiceService : LifecycleService(), SavedStateRegistryOwner {
         createChannel()
         lifecycleScope.launch {
             app.engine.state.collect { st ->
-                overlay?.onEngineState(st)
+                runCatching { overlay?.onEngineState(st) }
                 updateNotification(st)
                 maybeStop()
             }
         }
         lifecycleScope.launch {
-            app.settings.flow.collect { s -> overlay?.onSettings(s) }
+            app.settings.flow.collect { s -> runCatching { overlay?.onSettings(s) } }
         }
     }
 
@@ -111,15 +111,23 @@ class VoiceService : LifecycleService(), SavedStateRegistryOwner {
                 hideBubble()
             })
             lifecycleScope.launch {
-                overlay?.show(app.settings.current(), app.settings.bubblePos())
-                overlay?.onEngineState(app.engine.state.value)
+                try {
+                    overlay?.show(app.settings.current(), app.settings.bubblePos())
+                    overlay?.onEngineState(app.engine.state.value)
+                } catch (e: Exception) {
+                    // Never let the floating mic break the app: switch it off and tell the user.
+                    app.saveProblem("ভাসমান মাইক", e)
+                    app.settings.set(SettingsRepo.K.bubbleEnabled, false)
+                    Toast.makeText(this@VoiceService, "ভাসমান মাইক চালু করা যায়নি, বন্ধ করা হলো। অ্যাপ স্বাভাবিকভাবে চলবে।", Toast.LENGTH_LONG).show()
+                    hideBubble()
+                }
             }
         }
     }
 
     private fun hideBubble() {
         bubbleWanted = false
-        overlay?.destroy()
+        runCatching { overlay?.destroy() }
         overlay = null
         maybeStop()
     }

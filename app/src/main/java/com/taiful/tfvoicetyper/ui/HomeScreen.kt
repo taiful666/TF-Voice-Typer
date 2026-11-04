@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Layers
@@ -67,6 +68,7 @@ import com.taiful.tfvoicetyper.data.AppSettings
 import com.taiful.tfvoicetyper.engine.EngineState
 import com.taiful.tfvoicetyper.service.VoiceService
 import com.taiful.tfvoicetyper.util.Fmt
+import com.taiful.tfvoicetyper.util.Clip
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -105,6 +107,19 @@ fun HomeScreen(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        val problem by vm.tf.lastProblem.collectAsState()
+        problem?.let { p ->
+            SectionCard("আগের বার একটি সমস্যা হয়েছিল", Icons.Outlined.ErrorOutline) {
+                InfoText("সমস্যাটি ঠিক করার জন্য নিচের \"কপি\" চেপে লেখাটি Claude-কে পাঠান। ভাসমান মাইক সাময়িকভাবে বন্ধ করা হয়েছে — চাইলে আবার চালু করতে পারেন।")
+                Spacer(Modifier.height(6.dp))
+                Text(p.take(300), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 5)
+                Spacer(Modifier.height(8.dp))
+                ButtonRow {
+                    PillButton("কপি", Icons.Outlined.ContentCopy, filled = true) { Clip.copy(ctx, p, "সমস্যার বিবরণ") }
+                    PillButton("ঠিক আছে", Icons.Outlined.Close) { vm.tf.clearProblem() }
+                }
+            }
+        }
         if (!s.hasApiKey) {
             SectionCard("শুরু করতে Gemini API key দিন", Icons.Outlined.Key) {
                 InfoText("আপনার নিজের বিনামূল্যের Gemini API key লাগবে। এটি শুধু এই ফোনে, এনক্রিপ্ট করে রাখা হয়।")

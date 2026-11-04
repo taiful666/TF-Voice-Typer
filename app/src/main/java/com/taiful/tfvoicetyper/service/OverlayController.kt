@@ -128,9 +128,11 @@ class OverlayController(
 
     private fun composeHost(content: @Composable () -> Unit): FrameLayout {
         val frame = FrameLayout(service)
+        frame.id = View.generateViewId()
         frame.setViewTreeLifecycleOwner(service)
         frame.setViewTreeSavedStateRegistryOwner(service)
         frame.addView(ComposeView(service).apply {
+            id = View.generateViewId()
             setContent { TFTheme(settings.theme, settings.darkMode) { content() } }
         })
         return frame
@@ -158,9 +160,11 @@ class OverlayController(
                 handleTouch(this, ev); return true
             }
         }
+        host.id = View.generateViewId()
         host.setViewTreeLifecycleOwner(service)
         host.setViewTreeSavedStateRegistryOwner(service)
         host.addView(ComposeView(service).apply {
+            id = View.generateViewId()
             setContent { TFTheme(settings.theme, settings.darkMode) { BubbleUi() } }
         })
         createTarget() // added first, so the bubble always stays on top of it

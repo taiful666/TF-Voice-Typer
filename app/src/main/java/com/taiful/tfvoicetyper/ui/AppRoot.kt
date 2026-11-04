@@ -42,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -71,14 +72,24 @@ fun AppRoot(vm: MainViewModel, resumeTick: Int, openRecord: Long?, onOpenRecord:
 
     // Bring the floating mic back whenever the app is opened (Android allows starting it now).
     LaunchedEffect(resumeTick, s.bubbleEnabled) {
-        if (s.bubbleEnabled && Perm.mic(ctx) && Perm.overlay(ctx)) VoiceService.send(ctx, VoiceService.ACTION_BUBBLE_ON)
+        if (s.bubbleEnabled && vm.tf.lastProblem.value == null && Perm.mic(ctx) && Perm.overlay(ctx)) VoiceService.send(ctx, VoiceService.ACTION_BUBBLE_ON)
+    }
+
+    var pendingBubble by rememberSaveable { mutableStateOf(false) }
+    // Came back from the "display over other apps" screen with permission given → switch the mic on.
+    LaunchedEffect(resumeTick) {
+        if (pendingBubble && Perm.mic(ctx) && Perm.overlay(ctx)) {
+            pendingBubble = false
+            vm.set(SettingsRepo.K.bubbleEnabled, true)
+            VoiceService.send(ctx, VoiceService.ACTION_BUBBLE_ON)
+        }
     }
 
     val setBubble: (Boolean) -> Unit = { on ->
         if (on) {
             when {
                 !Perm.mic(ctx) -> perms.requestMic()
-                !Perm.overlay(ctx) -> Perm.openOverlaySettings(ctx)
+                !Perm.overlay(ctx) -> { pendingBubble = true; Perm.openOverlaySettings(ctx) }
                 else -> {
                     vm.set(SettingsRepo.K.bubbleEnabled, true)
                     VoiceService.send(ctx, VoiceService.ACTION_BUBBLE_ON)
@@ -86,6 +97,7 @@ fun AppRoot(vm: MainViewModel, resumeTick: Int, openRecord: Long?, onOpenRecord:
                 }
             }
         } else {
+            pendingBubble = false
             vm.set(SettingsRepo.K.bubbleEnabled, false)
             if (Perm.mic(ctx)) VoiceService.send(ctx, VoiceService.ACTION_BUBBLE_OFF)
         }
