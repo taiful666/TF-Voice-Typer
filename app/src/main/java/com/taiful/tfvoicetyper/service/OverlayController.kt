@@ -203,14 +203,14 @@ class OverlayController(
             if (!wasRecording) for (i in levels.indices) levels[i] = 0f
             levels.removeAt(0); levels.add(st.level.coerceIn(0f, 1f))
         }
-        setWide(st is EngineState.Recording)
+        applyPillMode(st is EngineState.Recording)
         val wantPanel = (st is EngineState.Done && st.source == Source.BUBBLE) ||
             (st is EngineState.Error && st.source == Source.BUBBLE)
         if (wantPanel && bubble != null) showPanel() else hidePanel()
     }
 
     /** Grows the round mic into a pill while recording (keeps it on the same screen edge). */
-    private fun setWide(w: Boolean) {
+    private fun applyPillMode(w: Boolean) {
         if (w == wide) return
         val p = bubbleParams
         if (p == null || bubble == null) { wide = w; return }
