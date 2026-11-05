@@ -95,10 +95,10 @@ class PhoneRecognizer(private val context: Context, private val onLevel: (Float)
                     failure = "মাইক্রোফোনের অনুমতি দেওয়া নেই।"
                 SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT, SpeechRecognizer.ERROR_SERVER -> {
                     netErrors++
-                    if (netErrors >= 3) failure = "ইন্টারনেট সংযোগ নেই বা খুব ধীর — ফোনের ভয়েস টাইপিং কাজ করছে না।"
+                    if (netErrors >= 3) failure = "ইন্টারনেট সংযোগ নেই বা খুব ধীর — ফোনের ভয়েস টাইপিং কাজ করছে না। নেট ছাড়া চালাতে Settings থেকে \"অফলাইন বাংলা ভয়েস\" ডাউনলোড করে নিন।"
                     else main.postDelayed({ listen() }, 800)
                 }
-                12, 13 -> failure = "এই ফোনের Google ভয়েস টাইপিংয়ে বাংলা নেই। Google অ্যাপ আপডেট করুন অথবা Settings-এ ফ্রি Gemini/Groq key দিন।"
+                12, 13 -> failure = "এই ফোনের Google ভয়েস টাইপিংয়ে বাংলা নেই। Settings-এ গিয়ে \"অফলাইন বাংলা ভয়েস\" ডাউনলোড করুন (key লাগে না), অথবা ফ্রি Gemini/Groq key দিন।"
                 else -> main.postDelayed({ listen() }, 400)
             }
         }

@@ -16,12 +16,18 @@ on:
     paths-ignore:
       - 'README.md'
       - 'docs/**'
+  # A check-only build for proposed changes: it builds and tests, but publishes nothing.
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
 
 permissions:
   contents: write
 
 concurrency:
-  group: tf-voice-typer-apk
+  group: tf-voice-typer-apk-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || 'main' }}
   cancel-in-progress: true
 
 jobs:
@@ -37,6 +43,31 @@ jobs:
           java-version: 17
 
       - uses: gradle/actions/setup-gradle@v4
+
+      # ---- Offline Bangla voice: engine library (official, pinned) ----
+      - name: Get the offline voice engine library (official sherpa-onnx, fingerprint-checked)
+        run: |
+          mkdir -p app/libs
+          curl -fsSL --retry 3 -o app/libs/sherpa-onnx.aar \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/sherpa-onnx-2.0.1.aar
+          echo "a8d09d1d32f3eb8520482c6d3d43fae674681c5b050385967c70a3c2c9bf0ee7  app/libs/sherpa-onnx.aar" | sha256sum -c -
+
+      # ---- Offline Bangla voice: model file (official source, pinned, then shrunk and tested) ----
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build and test the offline Bangla voice model
+        run: |
+          python -m pip install --quiet onnx onnxruntime numpy sherpa-onnx==2.0.1
+          mkdir -p model-work/src model-work/out
+          curl -fsSL --retry 3 -o model-work/src.tar.bz2 \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-bn-vosk-2026-02-09.tar.bz2
+          echo "1bc89d81ee33ba7ddef8454736aeeb55e3cc1593274272485c6da342202b4b18  model-work/src.tar.bz2" | sha256sum -c -
+          tar xjf model-work/src.tar.bz2 -C model-work/src
+          python tools/make_offline_model.py model-work/src/sherpa-onnx-streaming-zipformer-bn-vosk-2026-02-09 model-work/out
+          cp model-work/out/tf-bangla-offline.zip tf-bangla-offline.zip
+          ls -la tf-bangla-offline.zip
 
       - name: Permanent signing key (only if the secrets exist)
         env:
@@ -99,6 +130,7 @@ jobs:
           import hashlib, json, os
           apk = "TF-Voice-Typer.apk"
           data = open(apk, "rb").read()
+          model = open("tf-bangla-offline.zip", "rb").read()
           vc = int(os.environ["VC"])
           # What's new (shown in the app's update popup) comes from release-notes.txt
           try:
@@ -111,6 +143,9 @@ jobs:
               "notes": notes,
               "sha256": hashlib.sha256(data).hexdigest(),
               "size": len(data),
+              # fingerprint of the offline Bangla voice file (the app checks it after downloading)
+              "modelSha256": hashlib.sha256(model).hexdigest(),
+              "modelSize": len(model),
           }, open("version.json", "w", encoding="utf-8"), ensure_ascii=False)
           PY
           cat version.json
@@ -122,10 +157,11 @@ jobs:
           path: TF-Voice-Typer.apk
 
       - name: Publish the APK on the Releases page
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest TF-Voice-Typer.apk version.json --latest \
+          gh release create latest TF-Voice-Typer.apk version.json tf-bangla-offline.zip --latest \
             --title "TF Voice Typer — Android app (build ${{ github.run_number }})" \
             --notes "ফোনে ইনস্টল করতে নিচের TF-Voice-Typer.apk ফাইলটি ডাউনলোড করে খুলুন। (Build ${{ github.run_number }})"

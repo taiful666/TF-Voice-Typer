@@ -95,6 +95,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, setBubble: (Boolean) -> Un
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         EngineCard(vm, s)
+        OfflineCard(vm, s)
 
         // ---------------- Gemini API ----------------
         SectionCard("Gemini API — প্রধান (সবচেয়ে ভালো মান)", Icons.Outlined.Key) {

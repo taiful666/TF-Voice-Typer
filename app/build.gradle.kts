@@ -18,6 +18,8 @@ android {
         targetSdk = 35
         versionCode = vc
         versionName = "1.0.$vc"
+        // The offline voice engine ships for these phone types (covers practically every Android phone in use)
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     signingConfigs {
@@ -70,6 +72,8 @@ android {
     }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        // Keep the app download small: the offline engine files are stored compressed inside the APK
+        jniLibs.useLegacyPackaging = true
     }
 }
 
@@ -99,4 +103,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // Free Bangla → English translation inside the phone (used in no-key mode)
     implementation("com.google.mlkit:translate:17.0.3")
+    // Offline Bangla voice engine (sherpa-onnx, Apache-2.0). The official file is fetched and
+    // fingerprint-checked by the GitHub build (see .github/workflows/build-apk.yml); it is not stored in this repo.
+    implementation(files("libs/sherpa-onnx.aar"))
 }

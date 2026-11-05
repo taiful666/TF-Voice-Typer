@@ -9,6 +9,8 @@ import com.taiful.tfvoicetyper.ai.GeminiClient
 import com.taiful.tfvoicetyper.data.SettingsRepo
 import com.taiful.tfvoicetyper.data.db.AppDatabase
 import com.taiful.tfvoicetyper.engine.VoiceEngine
+import com.taiful.tfvoicetyper.offline.OfflineAsr
+import com.taiful.tfvoicetyper.offline.OfflineModel
 import com.taiful.tfvoicetyper.update.Updater
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +31,10 @@ class TFApp : Application() {
         private set
     lateinit var updater: Updater
         private set
+    lateinit var offline: OfflineModel
+        private set
+    lateinit var offlineAsr: OfflineAsr
+        private set
 
     /** Text of the last crash (shown once in the app so it can be copied and reported). */
     val lastProblem = MutableStateFlow<String?>(null)
@@ -41,6 +47,8 @@ class TFApp : Application() {
         db = AppDatabase.get(this)
         gemini = GeminiClient()
         groq = com.taiful.tfvoicetyper.ai.GroqClient()
+        offline = OfflineModel(this, appScope)
+        offlineAsr = OfflineAsr(offline, cacheDir)
         engine = VoiceEngine(this)
         updater = Updater(this, appScope)
         val prefs = getSharedPreferences("tf_crash", MODE_PRIVATE)

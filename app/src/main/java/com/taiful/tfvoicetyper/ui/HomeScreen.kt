@@ -36,6 +36,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.Refresh
@@ -116,14 +117,29 @@ fun HomeScreen(
                 }
             }
         }
+        val offlineState by vm.tf.offline.state.collectAsState()
         if (!s.hasApiKey && !s.hasGroqKey && s.engine != com.taiful.tfvoicetyper.data.AppSettings.ENGINE_PHONE) {
-            SectionCard("এখন key ছাড়াই চলছে (ফোনের ভয়েস টাইপিং)", Icons.Outlined.Key) {
-                Text(
-                    "আরও শুদ্ধ লেখা, দাঁড়ি-কমা আর ভালো অনুবাদের জন্য একটি ফ্রি Gemini বা Groq key দিন (২ মিনিটের কাজ)।",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(6.dp))
-                PillButton("ফ্রি key দিন", Icons.Outlined.Key, filled = true, onClick = onOpenSettings)
+            if (offlineState is com.taiful.tfvoicetyper.offline.OfflineState.Installed) {
+                SectionCard("এখন নেট ও key ছাড়াই চলছে (অফলাইন বাংলা ভয়েস)", Icons.Outlined.Key) {
+                    Text(
+                        "আরও শুদ্ধ লেখা, দাঁড়ি-কমা আর ভালো অনুবাদের জন্য একটি ফ্রি Gemini বা Groq key দিন (২ মিনিটের কাজ)।",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    PillButton("ফ্রি key দিন", Icons.Outlined.Key, filled = true, onClick = onOpenSettings)
+                }
+            } else {
+                SectionCard("এখন key ছাড়াই চলছে (ফোনের ভয়েস টাইপিং)", Icons.Outlined.Key) {
+                    Text(
+                        "কিছু ফোনে ফোনের নিজের ভয়েস টাইপিংয়ে বাংলা থাকে না। তখন \"অফলাইন বাংলা ভয়েস\" একবার ডাউনলোড করে নিলেই (২২ MB) নেট ও key ছাড়া সব ফোনে চলবে। অথবা আরও শুদ্ধ লেখার জন্য একটি ফ্রি Gemini বা Groq key দিন।",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    ButtonRow {
+                        PillButton("অফলাইন ভয়েস নিন", Icons.Outlined.CloudDownload, filled = true, onClick = onOpenSettings)
+                        PillButton("ফ্রি key দিন", Icons.Outlined.Key, onClick = onOpenSettings)
+                    }
+                }
             }
         }
         PermissionCard(tick, perms)
