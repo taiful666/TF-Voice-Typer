@@ -20,7 +20,7 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 data class AppSettings(
     val hasApiKey: Boolean = false,
     val hasGroqKey: Boolean = false,
-    /** auto = Gemini first then Groq; groq = Groq first then Gemini; phone = phone's own voice typing (no key) */
+    /** auto = Gemini first then Groq (then the offline model, if downloaded); groq = Groq first; offline = only the offline Bangla model; phone = phone's own voice typing (no key) */
     val engine: String = ENGINE_AUTO,
     val model: String = DEFAULT_MODEL,
     val translate: Boolean = true,
@@ -41,6 +41,7 @@ data class AppSettings(
         const val ENGINE_AUTO = "auto"
         const val ENGINE_GROQ = "groq"
         const val ENGINE_PHONE = "phone"
+        const val ENGINE_OFFLINE = "offline"
         const val STYLE_FLOAT = "float"
         const val STYLE_EDGE = "edge"
     }

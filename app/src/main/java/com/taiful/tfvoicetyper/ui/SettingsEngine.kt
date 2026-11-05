@@ -20,6 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.NetworkCheck
 import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Save
@@ -28,11 +30,13 @@ import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,24 +54,35 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.taiful.tfvoicetyper.data.AppSettings
 import com.taiful.tfvoicetyper.data.SettingsRepo
+import com.taiful.tfvoicetyper.offline.OfflineModel
+import com.taiful.tfvoicetyper.offline.OfflineState
 import kotlinx.coroutines.launch
 
 /** Which service writes the text. Default "auto" never leaves the user stuck. */
 @Composable
 fun EngineCard(vm: MainViewModel, s: AppSettings) {
+    val off by vm.tf.offline.state.collectAsState()
+    val offlineOn = off is OfflineState.Installed
     SectionCard("লেখা তৈরির ইঞ্জিন", Icons.Outlined.AutoAwesome) {
+        val keyed = listOfNotNull("Gemini".takeIf { s.hasApiKey }, "Groq".takeIf { s.hasGroqKey })
         val now = when {
-            s.engine == AppSettings.ENGINE_PHONE || (!s.hasApiKey && !s.hasGroqKey) -> "এখন চলছে: ফোনের ভয়েস টাইপিং (key ছাড়া)"
-            s.engine == AppSettings.ENGINE_GROQ -> "এখন চলছে: " + listOfNotNull("Groq".takeIf { s.hasGroqKey }, "Gemini".takeIf { s.hasApiKey }).joinToString(" → ")
-            else -> "এখন চলছে: " + listOfNotNull("Gemini".takeIf { s.hasApiKey }, "Groq".takeIf { s.hasGroqKey }).joinToString(" → ")
+            s.engine == AppSettings.ENGINE_OFFLINE && offlineOn -> "এখন চলছে: অফলাইন বাংলা ভয়েস (নেট লাগে না)"
+            s.engine == AppSettings.ENGINE_PHONE -> "এখন চলছে: ফোনের ভয়েস টাইপিং (key ছাড়া)"
+            keyed.isEmpty() -> if (offlineOn) "এখন চলছে: অফলাইন বাংলা ভয়েস (key ছাড়া, নেট ছাড়া)" else "এখন চলছে: ফোনের ভয়েস টাইপিং (key ছাড়া)"
+            else -> {
+                val order = if (s.engine == AppSettings.ENGINE_GROQ) keyed.sortedBy { it != "Groq" } else keyed
+                "এখন চলছে: " + (order + listOfNotNull("অফলাইন".takeIf { offlineOn })).joinToString(" → ")
+            }
         }
         Chip(now, MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(6.dp))
-        listOf(
-            Triple(AppSettings.ENGINE_AUTO, "স্বয়ংক্রিয় (প্রস্তাবিত)", "আগে Gemini, ব্যস্ত হলে নিজে থেকে Groq। কোনো key না থাকলে ফোনের ভয়েস টাইপিং।"),
-            Triple(AppSettings.ENGINE_GROQ, "আগে Groq", "Groq দ্রুত; ব্যস্ত হলে Gemini।"),
-            Triple(AppSettings.ENGINE_PHONE, "শুধু ফোনের ভয়েস টাইপিং", "কোনো key লাগে না, সীমাহীন। তবে দাঁড়ি-কমা ও বানান AI দিয়ে ঠিক হয় না।"),
-        ).forEach { (v, title, sub) ->
+        val choices = buildList {
+            add(Triple(AppSettings.ENGINE_AUTO, "স্বয়ংক্রিয় (প্রস্তাবিত)", "আগে Gemini, ব্যস্ত হলে নিজে থেকে Groq। নেট না থাকলে বা কোনো key না থাকলে অফলাইন বাংলা ভয়েস (ডাউনলোড করা থাকলে), নাহলে ফোনের ভয়েস টাইপিং।"))
+            add(Triple(AppSettings.ENGINE_GROQ, "আগে Groq", "Groq দ্রুত; ব্যস্ত হলে Gemini।"))
+            if (offlineOn) add(Triple(AppSettings.ENGINE_OFFLINE, "শুধু অফলাইন বাংলা ভয়েস", "নেট ও key কিছুই লাগে না, সীমাহীন। তবে Gemini-র মতো এত নিখুঁত নয়, দাঁড়ি-কমা বসে না।"))
+            add(Triple(AppSettings.ENGINE_PHONE, "শুধু ফোনের ভয়েস টাইপিং", "কোনো key লাগে না, সীমাহীন। তবে দাঁড়ি-কমা ও বানান AI দিয়ে ঠিক হয় না।"))
+        }
+        choices.forEach { (v, title, sub) ->
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).pressClick { vm.set(SettingsRepo.K.engine, v) }
                     .padding(vertical = 3.dp),
@@ -78,6 +93,59 @@ fun EngineCard(vm: MainViewModel, s: AppSettings) {
                     Text(title, style = MaterialTheme.typography.bodyMedium)
                     InfoText(sub)
                 }
+            }
+        }
+    }
+}
+
+/** One-tap download of the free offline Bangla voice (works with no internet and no key afterwards). */
+@Composable
+fun OfflineCard(vm: MainViewModel, s: AppSettings) {
+    val st by vm.tf.offline.state.collectAsState()
+    SectionCard("অফলাইন বাংলা ভয়েস — নেট ও key ছাড়া", Icons.Outlined.CloudDownload) {
+        InfoText("একবার ডাউনলোড করে রাখলে নেট না থাকলেও বাংলা লেখা চলবে, কোনো key লাগবে না, কোনো সীমা নেই। নেট থাকলে আগের মতোই Gemini কাজ করবে; Gemini ব্যস্ত বা বন্ধ থাকলে এটি নিজে থেকে কাজ করবে।")
+        Spacer(Modifier.height(8.dp))
+        when (val x = st) {
+            is OfflineState.Installed -> {
+                Chip("ইনস্টল করা আছে ✓ — নেট ছাড়াই চলবে", MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(8.dp))
+                ButtonRow {
+                    PillButton("মুছে ফেলুন", Icons.Outlined.Delete, color = MaterialTheme.colorScheme.error) {
+                        vm.tf.offlineAsr.release()
+                        vm.tf.offline.remove()
+                        if (s.engine == AppSettings.ENGINE_OFFLINE) vm.set(SettingsRepo.K.engine, AppSettings.ENGINE_AUTO)
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                InfoText("মুছলে ফোনের ~২৮ MB জায়গা ফিরে আসবে; দরকার হলে আবার ডাউনলোড করা যায়।")
+            }
+            is OfflineState.Downloading -> {
+                Chip("ডাউনলোড হচ্ছে… ${(x.progress * 100).toInt()}%", MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(6.dp))
+                LinearProgressIndicator(progress = { x.progress }, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(8.dp))
+                ButtonRow { PillButton("বন্ধ করুন", Icons.Outlined.Close, color = MaterialTheme.colorScheme.error) { vm.tf.offline.cancel() } }
+            }
+            is OfflineState.Unpacking -> {
+                Chip("প্রস্তুত করা হচ্ছে…", MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(6.dp))
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+            is OfflineState.Failed -> {
+                Text(x.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                Spacer(Modifier.height(8.dp))
+                ButtonRow {
+                    PillButton("আবার চেষ্টা", Icons.Outlined.CloudDownload, filled = true) { vm.tf.offline.dismissError(); vm.tf.offline.install() }
+                }
+            }
+            is OfflineState.NotInstalled -> {
+                Chip("এখনো ডাউনলোড করা নেই", MaterialTheme.colorScheme.error)
+                Spacer(Modifier.height(8.dp))
+                ButtonRow {
+                    PillButton("ডাউনলোড করুন (~${OfflineModel.APPROX_MB} MB, একবারই)", Icons.Outlined.CloudDownload, filled = true) { vm.tf.offline.install() }
+                }
+                Spacer(Modifier.height(4.dp))
+                InfoText("ওয়াইফাইয়ে নামানো ভালো। ডাউনলোড শেষ হলে আর নেট লাগবে না।")
             }
         }
     }

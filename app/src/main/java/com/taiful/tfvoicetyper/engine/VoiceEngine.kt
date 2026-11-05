@@ -2,6 +2,8 @@ package com.taiful.tfvoicetyper.engine
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
@@ -44,6 +46,9 @@ sealed interface EngineState {
  */
 private const val GEMINI = "gemini"
 private const val GROQ = "groq"
+private const val OFFLINE = "offline"
+
+private fun providerName(p: String) = when (p) { GEMINI -> "Gemini"; GROQ -> "Groq"; else -> "অফলাইন" }
 
 class VoiceEngine(private val app: TFApp) {
     private val dao get() = app.db.records()
@@ -61,8 +66,20 @@ class VoiceEngine(private val app: TFApp) {
         scope.launch { app.settings.flow.collect { cfg = it } }
     }
 
-    /** No key at all (or chosen in Settings) → use the phone's own free voice typing. */
-    val usesPhone: Boolean get() = cfg.engine == AppSettings.ENGINE_PHONE || (!cfg.hasApiKey && !cfg.hasGroqKey)
+    /**
+     * No key at all (or chosen in Settings) → use the phone's own free voice typing,
+     * unless the offline Bangla voice is downloaded: then that is used instead (it needs no language pack).
+     */
+    val usesPhone: Boolean get() = cfg.engine == AppSettings.ENGINE_PHONE || (!cfg.hasApiKey && !cfg.hasGroqKey && !app.offline.isInstalled)
+
+    /** Is the phone connected to the internet right now? (If we cannot tell, assume yes.) */
+    private fun isOnline(): Boolean = try {
+        val cm = app.getSystemService(ConnectivityManager::class.java)
+        val caps = cm?.getNetworkCapabilities(cm.activeNetwork)
+        caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    } catch (e: Exception) {
+        true
+    }
     private var recordId: CompletableDeferred<Long>? = null
     private var ticker: Job? = null
     private var processJob: Job? = null
@@ -128,7 +145,7 @@ class VoiceEngine(private val app: TFApp) {
     private fun startPhone(source: Source) {
         if (!PhoneRecognizer.available(app)) {
             _state.value = EngineState.Error(
-                "এই ফোনে Google ভয়েস টাইপিং পাওয়া যায়নি। Settings-এ একটি ফ্রি Gemini বা Groq key দিন — তাহলে আরও ভালো লেখা পাবেন।", null, source
+                "এই ফোনে Google ভয়েস টাইপিং পাওয়া যায়নি। Settings-এ গিয়ে \"অফলাইন বাংলা ভয়েস\" ডাউনলোড করুন (key লাগে না), অথবা একটি ফ্রি Gemini/Groq key দিন।", null, source
             )
             return
         }
@@ -262,9 +279,18 @@ class VoiceEngine(private val app: TFApp) {
                 val gKey = app.settings.apiKey()
                 val qKey = app.settings.groqKey()
                 val order = if (s.engine == AppSettings.ENGINE_GROQ) listOf(GROQ, GEMINI) else listOf(GEMINI, GROQ)
-                val providers = order.filter { (it == GEMINI && gKey != null) || (it == GROQ && qKey != null) }.toMutableList()
+                val online = order.filter { (it == GEMINI && gKey != null) || (it == GROQ && qKey != null) }
+                val offlineReady = app.offline.isInstalled
+                // Order of tries: online AI first (best quality); the offline Bangla voice is the safety net.
+                // No internet right now, or no key, or "only offline" chosen → offline goes first.
+                val providers: MutableList<String> = when {
+                    offlineReady && (s.engine == AppSettings.ENGINE_OFFLINE || online.isEmpty()) -> mutableListOf(OFFLINE)
+                    offlineReady && !isOnline() -> (listOf(OFFLINE) + online).toMutableList()
+                    offlineReady -> (online + OFFLINE).toMutableList()
+                    else -> online.toMutableList()
+                }
                 if (providers.isEmpty()) throw GeminiException(
-                    "কোনো API key দেওয়া নেই। Settings-এ একটি ফ্রি Gemini বা Groq key দিন, তারপর \"আবার চেষ্টা\" চাপুন।"
+                    "কোনো API key দেওয়া নেই। Settings-এ একটি ফ্রি Gemini বা Groq key দিন — অথবা \"অফলাইন বাংলা ভয়েস\" ডাউনলোড করুন (key লাগে না)। তারপর \"আবার চেষ্টা\" চাপুন।"
                 )
                 val bn = StringBuilder()
                 val en = StringBuilder()
@@ -277,13 +303,17 @@ class VoiceEngine(private val app: TFApp) {
                     var t: Transcript? = null
                     for (p in providers.toList()) {
                         t = try {
-                            if (p == GEMINI) app.gemini.transcribe(
-                                key = gKey!!, model = s.model, audio = bytes, mime = AacRecorder.MIME,
-                                part = i + 1, parts = files.size, previousTail = tail,
-                                translate = s.translate, patient = providers.size == 1,
-                            ) else {
-                                val m4a = withContext(Dispatchers.IO) { AdtsToM4a.convert(bytes, File(app.cacheDir, "groq_part.m4a")) }
-                                app.groq.transcribe(qKey!!, m4a, tail, s.translate)
+                            when (p) {
+                                GEMINI -> app.gemini.transcribe(
+                                    key = gKey!!, model = s.model, audio = bytes, mime = AacRecorder.MIME,
+                                    part = i + 1, parts = files.size, previousTail = tail,
+                                    translate = s.translate, patient = providers.size == 1,
+                                )
+                                OFFLINE -> Transcript(app.offlineAsr.transcribe(f), "")
+                                else -> {
+                                    val m4a = withContext(Dispatchers.IO) { AdtsToM4a.convert(bytes, File(app.cacheDir, "groq_part.m4a")) }
+                                    app.groq.transcribe(qKey!!, m4a, tail, s.translate)
+                                }
                             }
                         } catch (e: CancellationException) {
                             throw e
@@ -293,7 +323,11 @@ class VoiceEngine(private val app: TFApp) {
                             errors += p to GeminiException(e.message ?: e.javaClass.simpleName, retryable = true); null
                         }
                         if (t != null) {
-                            used += if (p == GEMINI) "Gemini (${s.model})" else "Groq (Whisper)"
+                            used += when (p) {
+                                GEMINI -> "Gemini (${s.model})"
+                                OFFLINE -> "অফলাইন বাংলা ভয়েস (নেট ছাড়া)"
+                                else -> "Groq (Whisper)"
+                            }
                             // the one that worked goes first for the next parts
                             providers.remove(p); providers.add(0, p)
                             break
@@ -302,8 +336,8 @@ class VoiceEngine(private val app: TFApp) {
                     val ok = t ?: throw when {
                         errors.size == 1 -> errors[0].second
                         else -> GeminiException(
-                            "Gemini ও Groq দুটোই এই মুহূর্তে কাজ করছে না। অডিও সংরক্ষিত আছে — একটু পরে \"আবার চেষ্টা\" চাপুন।\n" +
-                                errors.joinToString("\n") { (p, e) -> "• ${if (p == GEMINI) "Gemini" else "Groq"}: ${e.userMessage.lineSequence().first()}" },
+                            "লেখা তৈরির সব পথই এই মুহূর্তে কাজ করছে না। অডিও সংরক্ষিত আছে — একটু পরে \"আবার চেষ্টা\" চাপুন।\n" +
+                                errors.joinToString("\n") { (p, e) -> "• ${providerName(p)}: ${e.userMessage.lineSequence().first()}" },
                             retryable = true,
                         )
                     }

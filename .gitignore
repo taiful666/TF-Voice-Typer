@@ -4,6 +4,9 @@ local.properties
 *.iml
 .idea/
 *.apk
+# Downloaded by the GitHub build, never committed
+app/libs/
+model-work/
 *.aab
 # Signing keys and secrets must never be committed
 *.jks
