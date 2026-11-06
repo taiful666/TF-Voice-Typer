@@ -52,6 +52,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -118,27 +120,27 @@ fun HomeScreen(
             }
         }
         val offlineState by vm.tf.offline.state.collectAsState()
-        if (!s.hasApiKey && !s.hasGroqKey && s.engine != com.taiful.tfvoicetyper.data.AppSettings.ENGINE_PHONE) {
-            if (offlineState is com.taiful.tfvoicetyper.offline.OfflineState.Installed) {
-                SectionCard("এখন নেট ও key ছাড়াই চলছে (অফলাইন বাংলা ভয়েস)", Icons.Outlined.Key) {
-                    Text(
-                        "আরও শুদ্ধ লেখা, দাঁড়ি-কমা আর ভালো অনুবাদের জন্য একটি ফ্রি Gemini বা Groq key দিন (২ মিনিটের কাজ)।",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    PillButton("ফ্রি key দিন", Icons.Outlined.Key, filled = true, onClick = onOpenSettings)
-                }
-            } else {
-                SectionCard("এখন key ছাড়াই চলছে (ফোনের ভয়েস টাইপিং)", Icons.Outlined.Key) {
-                    Text(
-                        "কিছু ফোনে ফোনের নিজের ভয়েস টাইপিংয়ে বাংলা থাকে না। তখন \"অফলাইন বাংলা ভয়েস\" একবার ডাউনলোড করে নিলেই (২২ MB) নেট ও key ছাড়া সব ফোনে চলবে। অথবা আরও শুদ্ধ লেখার জন্য একটি ফ্রি Gemini বা Groq key দিন।",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    ButtonRow {
-                        PillButton("অফলাইন ভয়েস নিন", Icons.Outlined.CloudDownload, filled = true, onClick = onOpenSettings)
-                        PillButton("ফ্রি key দিন", Icons.Outlined.Key, onClick = onOpenSettings)
-                    }
+        // Shown only after a "no internet" problem, so normal use stays clean.
+        var offlineHintOpen by remember { mutableStateOf(false) }
+        LaunchedEffect(st) {
+            val e = st
+            if (e is EngineState.Error && (e.message.contains("নেট নেই") || e.message.contains("ইন্টারনেট"))) offlineHintOpen = true
+        }
+        val hasGoogleVoice = remember { com.taiful.tfvoicetyper.audio.PhoneRecognizer.available(ctx) }
+        if (offlineState !is com.taiful.tfvoicetyper.offline.OfflineState.Installed && (!hasGoogleVoice || offlineHintOpen)) {
+            SectionCard(
+                if (hasGoogleVoice) "নেট ছাড়াও লিখতে চান?" else "এই ফোনে Google ভয়েস নেই",
+                Icons.Outlined.CloudDownload,
+            ) {
+                Text(
+                    if (hasGoogleVoice) "নেট থাকলে Google ভয়েস ফ্রিতে লিখে দেয়। নেট না থাকলেও লিখতে Settings থেকে \"অফলাইন বাংলা ভয়েস\" একবার ডাউনলোড করে রাখুন (২২ MB)।"
+                    else "Play Store থেকে \"Google\" অ্যাপ ইনস্টল করলে ফ্রিতে বাংলা লেখা চলবে। অথবা Settings থেকে \"অফলাইন বাংলা ভয়েস\" ডাউনলোড করুন (২২ MB, key লাগে না)।",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                ButtonRow {
+                    PillButton("অফলাইন ভয়েস নিন", Icons.Outlined.CloudDownload, filled = true, onClick = onOpenSettings)
+                    if (hasGoogleVoice) PillButton("পরে", Icons.Outlined.Close) { offlineHintOpen = false }
                 }
             }
         }
@@ -251,6 +253,19 @@ private fun RecorderCard(st: EngineState, onMic: () -> Unit, onCancel: () -> Uni
                         Text(Fmt.duration(st.elapsedMs), style = MaterialTheme.typography.headlineSmall, color = Color(0xFFDC2626))
                         Spacer(Modifier.height(6.dp))
                         LevelBars(levels)
+                        if (st.text.isNotBlank()) {
+                            // Live words, like speechtexter.com — the user sees it is typing
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                st.text.takeLast(150),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = c.onSurface,
+                                textAlign = TextAlign.Center,
+                                maxLines = 4,
+                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                                    .background(c.surfaceVariant.copy(alpha = 0.5f)).padding(horizontal = 10.dp, vertical = 6.dp),
+                            )
+                        }
                         Spacer(Modifier.height(10.dp))
                         ButtonRow {
                             PillButton("থামান", Icons.Rounded.Stop, Modifier.weight(1.4f), filled = true, onClick = onMic)

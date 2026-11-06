@@ -122,6 +122,39 @@ class GeminiClient(private val baseUrl: String = "https://generativelanguage.goo
         return parsed
     }
 
+    /**
+     * Text only (no audio): fixes the raw text from Google voice typing — spelling, দাঁড়ি-কমা — and translates.
+     * Much smaller than sending audio, so it is fast and rarely "busy". Never waits long: the caller keeps the
+     * raw text if this fails.
+     */
+    suspend fun polishText(key: String, model: String, raw: String, translate: Boolean): Transcript {
+        val schema = JSONObject()
+            .put("type", "OBJECT")
+            .put("properties", JSONObject()
+                .put("bangla", JSONObject().put("type", "STRING"))
+                .put("english", JSONObject().put("type", "STRING")))
+            .put("required", JSONArray().put("bangla").put("english"))
+        val user = buildString {
+            append("RAW TEXT:\n«")
+            append(raw)
+            append("»")
+            if (!translate) append("\nEnglish translation is turned off: set \"english\" to an empty string.")
+        }
+        val body = JSONObject()
+            .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", Prompt.TEXT_SYSTEM))))
+            .put("contents", JSONArray().put(JSONObject().put("role", "user")
+                .put("parts", JSONArray().put(JSONObject().put("text", user)))))
+            .put("generationConfig", JSONObject()
+                .put("temperature", 0.1)
+                .put("responseMimeType", "application/json")
+                .put("responseSchema", schema))
+        val text = extractText(JSONObject(generate(key, model, body, fallback = true, patient = false)))
+        val t = parseTranscript(text)
+        // Safety: if the answer is empty or suspiciously short, keep the user's own words.
+        if (t.bangla.isBlank() || t.bangla.length < raw.length / 3) throw GeminiException("polish-empty", retryable = true)
+        return t
+    }
+
     private fun parseTranscript(raw: String): Transcript {
         var t = raw.trim()
         if (t.startsWith("```")) t = t.substringAfter('\n').substringBeforeLast("```").trim()

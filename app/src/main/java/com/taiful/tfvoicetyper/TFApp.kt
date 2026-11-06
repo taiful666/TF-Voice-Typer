@@ -25,8 +25,6 @@ class TFApp : Application() {
         private set
     lateinit var gemini: GeminiClient
         private set
-    lateinit var groq: com.taiful.tfvoicetyper.ai.GroqClient
-        private set
     lateinit var engine: VoiceEngine
         private set
     lateinit var updater: Updater
@@ -46,7 +44,6 @@ class TFApp : Application() {
         settings = SettingsRepo(this)
         db = AppDatabase.get(this)
         gemini = GeminiClient()
-        groq = com.taiful.tfvoicetyper.ai.GroqClient()
         offline = OfflineModel(this, appScope)
         offlineAsr = OfflineAsr(offline, cacheDir)
         engine = VoiceEngine(this)
@@ -59,6 +56,7 @@ class TFApp : Application() {
             appScope.launch { settings.set(SettingsRepo.K.bubbleEnabled, false) }
         }
         appScope.launch {
+            settings.wipeLegacy()
             engine.recoverInterrupted()
             engine.cleanupAudio()
         }

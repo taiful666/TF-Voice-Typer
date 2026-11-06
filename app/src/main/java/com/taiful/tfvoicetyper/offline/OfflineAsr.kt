@@ -15,6 +15,8 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.abs
+import kotlin.math.sqrt
 
 /**
  * Writes Bangla text from a saved recording right inside the phone (no internet, no key).
@@ -70,11 +72,26 @@ class OfflineAsr(private val model: OfflineModel, private val cacheDir: File) {
         try {
             if (!model.isInstalled) throw GeminiException("অফলাইন বাংলা মডেল ডাউনলোড করা নেই। Settings থেকে ডাউনলোড করুন।")
             m4a.writeBytes(AdtsToM4a.convert(aac.readBytes(), m4a))
+            // Pass 1: how loud is the recording? Quiet phone mics are the main reason the small offline
+            // model "hears nothing" or writes wrong words, so we bring the voice up to a clear level.
+            var peak = 0f
+            var sumSq = 0.0
+            var count = 0L
+            AacPcmDecoder.decode(m4a) { samples, _ ->
+                job?.ensureActive()
+                for (v in samples) { val a = abs(v); if (a > peak) peak = a; sumSq += (v * v).toDouble() }
+                count += samples.size
+            }
+            val rms = if (count > 0) sqrt(sumSq / count).toFloat() else 0f
+            if (count == 0L || peak < 0.003f) return@withContext ""   // silence
+            val gain = minOf(0.9f / peak, if (rms > 0f) 0.12f / rms else 1f, 12f).coerceAtLeast(1f)
+
             val r = recognizer()
             val stream = r.createStream("")
             try {
                 AacPcmDecoder.decode(m4a) { samples, frac ->
                     job?.ensureActive()
+                    if (gain > 1.01f) for (i in samples.indices) samples[i] = (samples[i] * gain).coerceIn(-1f, 1f)
                     stream.acceptWaveform(samples, AacPcmDecoder.OUT_RATE)
                     while (r.isReady(stream)) r.decode(stream)
                     onProgress(frac)
