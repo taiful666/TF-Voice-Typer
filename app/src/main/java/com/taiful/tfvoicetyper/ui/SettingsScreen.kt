@@ -98,7 +98,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, setBubble: (Boolean) -> Un
         OfflineCard(vm, s)
 
         // ---------------- Gemini API ----------------
-        SectionCard("Gemini API — প্রধান (সবচেয়ে ভালো মান)", Icons.Outlined.Key) {
+        SectionCard("Gemini API — ঐচ্ছিক (বানান ও দাঁড়ি-কমা আরও নিখুঁত)", Icons.Outlined.Key) {
             var key by remember { mutableStateOf("") }
             var show by remember { mutableStateOf(false) }
             var msg by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
@@ -214,8 +214,6 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, setBubble: (Boolean) -> Un
                 Text(t, style = MaterialTheme.typography.bodySmall, color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
             }
         }
-
-        GroqCard(vm, s)
 
         // ---------------- Theme ----------------
         SectionCard("থিম ও রং", Icons.Outlined.Palette) {
@@ -416,7 +414,7 @@ private fun modelHint(m: String): String? = when {
 }
 
 @Composable
-private fun SwitchRow(title: String, sub: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
+internal fun SwitchRow(title: String, sub: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).padding(end = 8.dp)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)

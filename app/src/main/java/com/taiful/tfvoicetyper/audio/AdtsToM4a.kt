@@ -8,7 +8,7 @@ import java.io.File
 import java.nio.ByteBuffer
 
 /**
- * Our recordings are raw AAC ("ADTS"). Some services (Groq/Whisper) only accept normal audio files,
+ * Our recordings are raw AAC ("ADTS"). Some decoders (like the offline engine's) only accept normal audio files,
  * so this wraps the same sound in an .m4a box. Nothing is re-encoded, so it is instant and lossless.
  */
 object AdtsToM4a {

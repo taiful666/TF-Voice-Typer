@@ -19,9 +19,14 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 
 data class AppSettings(
     val hasApiKey: Boolean = false,
-    val hasGroqKey: Boolean = false,
-    /** auto = Gemini first then Groq (then the offline model, if downloaded); groq = Groq first; offline = only the offline Bangla model; phone = phone's own voice typing (no key) */
+    /**
+     * auto   = free Google voice typing (live, no key, like speechtexter.com); with no internet → offline Bangla voice
+     * gemini = record the audio and let Gemini write it (needs a key; Gemini can be busy)
+     * offline = only the downloaded offline Bangla voice
+     */
     val engine: String = ENGINE_AUTO,
+    /** With a Gemini key: after Google voice typing, Gemini fixes spelling / দাঁড়ি-কমা (text only, small and fast). */
+    val aiPolish: Boolean = true,
     val model: String = DEFAULT_MODEL,
     val translate: Boolean = true,
     val autoCopy: Boolean = true,
@@ -39,8 +44,7 @@ data class AppSettings(
     companion object {
         const val DEFAULT_MODEL = "gemini-flash-latest"
         const val ENGINE_AUTO = "auto"
-        const val ENGINE_GROQ = "groq"
-        const val ENGINE_PHONE = "phone"
+        const val ENGINE_GEMINI = "gemini"
         const val ENGINE_OFFLINE = "offline"
         const val STYLE_FLOAT = "float"
         const val STYLE_EDGE = "edge"
@@ -52,7 +56,9 @@ class SettingsRepo(private val context: Context) {
 
     object K {
         val apiKey = stringPreferencesKey("api_key_enc")
-        val groqKey = stringPreferencesKey("groq_key_enc")
+        /** Old Groq key from earlier versions — only kept so it can be wiped from the phone. */
+        val legacyGroqKey = stringPreferencesKey("groq_key_enc")
+        val aiPolish = booleanPreferencesKey("ai_polish")
         val engine = stringPreferencesKey("engine")
         val model = stringPreferencesKey("model")
         val translate = booleanPreferencesKey("translate")
@@ -72,8 +78,11 @@ class SettingsRepo(private val context: Context) {
     val flow: Flow<AppSettings> = ds.data.map { p ->
         AppSettings(
             hasApiKey = !p[K.apiKey].isNullOrEmpty(),
-            hasGroqKey = !p[K.groqKey].isNullOrEmpty(),
-            engine = p[K.engine] ?: AppSettings.ENGINE_AUTO,
+            engine = when (val e = p[K.engine]) {
+                AppSettings.ENGINE_GEMINI, AppSettings.ENGINE_OFFLINE -> e
+                else -> AppSettings.ENGINE_AUTO   // old "groq" / "phone" choices now mean the free Google voice
+            },
+            aiPolish = p[K.aiPolish] ?: true,
             model = p[K.model] ?: AppSettings.DEFAULT_MODEL,
             translate = p[K.translate] ?: true,
             autoCopy = p[K.autoCopy] ?: true,
@@ -110,16 +119,9 @@ class SettingsRepo(private val context: Context) {
         }
     }
 
-    suspend fun groqKey(): String? = withContext(Dispatchers.Default) {
-        val enc = ds.data.first()[K.groqKey] ?: return@withContext null
-        SecureStore.decrypt(enc)?.takeIf { it.isNotBlank() }
-    }
-
-    suspend fun setGroqKey(key: String?) = withContext(Dispatchers.Default) {
-        val clean = key?.trim().orEmpty()
-        ds.edit {
-            if (clean.isEmpty()) it.remove(K.groqKey) else it[K.groqKey] = SecureStore.encrypt(clean)
-        }
+    /** Groq was removed: wipe any old Groq key left on the phone. */
+    suspend fun wipeLegacy() {
+        ds.edit { it.remove(K.legacyGroqKey) }
     }
 
     suspend fun bubblePos(): Pair<Int, Int>? {

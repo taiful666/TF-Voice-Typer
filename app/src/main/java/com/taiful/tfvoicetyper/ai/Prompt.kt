@@ -26,7 +26,7 @@ OUTPUT
 Return only JSON with two string fields: "bangla" (the corrected Bangla text) and "english" (the English translation).
 """.trimIndent()
 
-    /** For the Groq backup: the speech is already text, we only fix it and translate. */
+    /** After free Google voice typing: the speech is already text, Gemini only fixes it and translates. */
     val TEXT_SYSTEM = """
 You are an expert Bangla (Bengali) editor for a user in Bangladesh. You receive RAW text from an automatic
 speech recogniser. It may have mis-heard words, wrong spellings, no punctuation, or words in the wrong script.
